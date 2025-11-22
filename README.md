@@ -1,1 +1,1 @@
-<img width="5061" height="4931" alt="dbStruct (2)" src="https://github.com/user-attachments/assets/260ffe99-4126-49f8-8722-fd6c29bcba23" />
+<img width="1979" height="1590" alt="Untitled diagram-2025-11-22-224737" src="https://github.com/user-attachments/assets/5bf4d673-2c4e-4a6d-8b24-7e9940550092" />
