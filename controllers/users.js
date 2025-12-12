@@ -2,7 +2,8 @@ const crypto = require('crypto');
 const User = require('../models/users'); 
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { sendStatusChangeEmail } = require('../utilities/email');
+const { sendResetPasswordEmail } = require('../utilities/email');
+const {sendWelcomeEmail}=require('../utilities/email');
 const secret = process.env.JWT_SECRET;
 
 const sanitizeUser = (user) => {
@@ -45,7 +46,7 @@ const createUser = async (req, res) => {
             phone,
             password: hashedPassword,
             role: role || 'buyer',
-            isEmailVerified: true, // جعلته مفعلاً تلقائياً للتسهيل حالياً
+            isEmailVerified: false, // جعلته مفعلاً تلقائياً للتسهيل حالياً
             verificationToken, 
             verificationTokenExpires: Date.now() + 24 * 60 * 60 * 1000 // صالح لمدة 24 ساعة
         });
@@ -53,7 +54,7 @@ const createUser = async (req, res) => {
         await newUser.save();
 
         // تم إيقاف إرسال الإيميل مؤقتاً لتجنب توقف السيرفر
-        await sendEmail(newUser.email, verificationToken); 
+        await sendWelcomeEmail(newUser.email, newUser.name ,verificationToken); 
 
         res.status(201).json({ 
             message: 'User created successfully.', 
@@ -231,11 +232,7 @@ const forgotPassword = async (req, res) => {
         await user.save();
 
         
-        await sendEmail({
-            email: user.email,
-            subject: 'Password Reset Token',
-            message: `Your token is: ${resetToken}`
-        });
+        await sendResetPasswordEmail(user.email,resetToken);
         
 
         res.status(200).json({ 
@@ -249,54 +246,73 @@ const forgotPassword = async (req, res) => {
 };
 
 // 10. Reset Password
-
+// 10. Reset Password (النسخة النهائية النظيفة)
 const resetPassword = async (req, res) => {
     try {
         const { token } = req.params; 
         const { password } = req.body;
 
-        // 1. تنظيف التوكن من أي مسافات زيادة (مهم جداً)
+        // 1. تنظيف وتشفير التوكن القادم من الرابط
         const cleanToken = token.trim();
-
-        console.log("------------------------------------------------");
-        console.log("1. التوكن اللي وصل من الرابط:", cleanToken);
-
-        // 2. تشفير التوكن عشان نقارنه بالداتابيز
         const hashedToken = crypto.createHash('sha256').update(cleanToken).digest('hex');
-        console.log("2. التوكن بعد التشفير:", hashedToken);
 
-        // 3. البحث عن المستخدم (من غير شرط الوقت الأول عشان نتأكد)
-        const userExists = await User.findOne({ resetPasswordToken: hashedToken });
-        
-        if (!userExists) {
-            console.log("❌ المصيبة هنا: السيرفر مش لاقي التوكن ده في الداتابيز أصلاً!");
-            return res.status(400).json({ message: 'Invalid token (Not found in DB)' });
+        // 2. البحث عن المستخدم بشرطين:
+        // أ) التوكن مطابق
+        // ب) تاريخ الانتهاء لسه مجاش (أكبر من الوقت الحالي)
+        const user = await User.findOne({
+            resetPasswordToken: hashedToken,
+            resetPasswordExpires: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid or expired token' });
         }
 
-        console.log("✅ تمام! التوكن موجود في الداتابيز.");
-        console.log("3. وقت الانتهاء المسجل:", userExists.resetPasswordExpires);
-        console.log("4. الوقت الحالي:", Date.now());
-
-        // 4. التأكد من الوقت
-        if (userExists.resetPasswordExpires < Date.now()) {
-            console.log("❌ التوكن موجود بس انتهت صلاحيته (Expired)");
-            return res.status(400).json({ message: 'Token expired' });
-        }
-
-        // --- لو وصلنا هنا يبقى كله تمام ---
+        // 3. تحديث كلمة المرور
         const salt = await bcrypt.genSalt(10);
-        userExists.password = await bcrypt.hash(password, salt);
+        user.password = await bcrypt.hash(password, salt);
 
-        userExists.resetPasswordToken = undefined;
-        userExists.resetPasswordExpires = undefined;
+        // 4. تنظيف حقول الاستعادة لمنع استخدام التوكن مرة أخرى
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
 
-        await userExists.save();
-        console.log("🎉 تم تغيير الباسورد بنجاح!");
+        await user.save();
 
         res.status(200).json({ message: 'Password reset successful. You can now login.' });
 
     } catch (error) {
-        console.error("Server Error:", error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+const verifyEmail = async (req, res) => {
+    try {
+        const { token } = req.params;
+
+        // البحث عن المستخدم بالتوكن (والتأكد أن الوقت لم ينتهِ)
+        const user = await User.findOne({
+            verificationToken: token,
+            verificationTokenExpires: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid or expired verification token' });
+        }
+
+        // تفعيل الحساب وتنظيف التوكن
+        user.isEmailVerified = true;
+        user.verificationToken = undefined;
+        user.verificationTokenExpires = undefined;
+
+        await user.save();
+
+        // هنا ممكن نرجعه صفحة HTML حلوة تقول "تم التفعيل"
+        res.status(200).send(`
+            <h1 style="color: green; text-align: center;">Email Verified Successfully! ✅</h1>
+            <p style="text-align: center;">You can now login to your account.</p>
+        `);
+
+    } catch (error) {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
@@ -311,5 +327,6 @@ module.exports = {
     socialLogin, 
     verify2FA,
     forgotPassword,
-    resetPassword
+    resetPassword,
+    verifyEmail
 };
