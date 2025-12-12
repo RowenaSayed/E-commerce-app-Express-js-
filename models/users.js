@@ -11,18 +11,67 @@ const AddressSchema = new Schema({
 });
 
 const UserSchema = new Schema({
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    phone: { type: String, required: true, unique: true },
-    role:{type:String,required:true,enum:['admin','support','buyer']},
-    password: { type: String, required: true },
+    // --- المعلومات الأساسية ---
+    name: { type: String, required: true, trim: true },
+    email: { 
+        type: String, 
+        required: true, 
+        unique: true, 
+        lowercase: true, 
+        trim: true 
+    },
+    phone: { type: String, sparse: true, unique: true }, // sparse: يسمح بالتكرار للقيم null (في حال سجل بجوجل ولم يدخل رقم هاتف)
+
+    // --- كلمة المرور (Conditional Requirement) ---
+    // كلمة المرور مطلوبة فقط إذا لم يكن المستخدم مسجلاً عبر السوشيال ميديا
+    password: { 
+        type: String, 
+        required: function() {
+            return !this.socialAccounts.googleId && !this.socialAccounts.facebookId;
+        } 
+    },
+
+    role: { type: String, enum: ['admin', 'support', 'buyer'], default: 'buyer' },
     profilePicture: String,
     addresses: [AddressSchema],
-    twoFactorEnabled: { type: Boolean, default: false },
+
+    // --- Social Login (Google & Facebook) ---
     socialAccounts: {
-        google: String,
-        facebook: String,
+        googleId: { type: String, unique: true, sparse: true },
+        facebookId: { type: String, unique: true, sparse: true },
+        // نحتفظ بصورة البروفايل القادمة من السوشيال ميديا إذا احتجنا
+        profileUrl: String 
     },
+
+    // --- التحقق من الحساب (Verification) ---
+    isEmailVerified: { type: Boolean, default: false },
+    isPhoneVerified: { type: Boolean, default: false },
+    
+    // Tokens for Email/Phone Verification
+    verificationToken: String,
+    verificationTokenExpires: Date,
+
+    // --- استعادة كلمة المرور ---
+    passwordResetToken: String,
+    passwordResetExpires: Date,
+
+    // --- Multi-Factor Authentication (2FA) ---
+    twoFactorEnabled: { type: Boolean, default: false },
+    
+    // نوع الـ 2FA المفضل (تطبيق مثل Google Authenticator أو رسالة SMS)
+    twoFactorMethod: { 
+        type: String, 
+        enum: ['app', 'sms', 'email'], 
+        default: 'email' 
+    },
+    
+    // السر الخاص بتطبيقات المصادقة (TOTP Secret)
+    twoFactorSecret: String, 
+    
+    // أكواد احتياطية للدخول في حال ضياع الهاتف (Backup Codes)
+    twoFactorRecoveryCodes: [String],
+
+    // Notification Preferences
     notificationPreferences: {
         email: { type: Boolean, default: true },
         sms: { type: Boolean, default: true },
