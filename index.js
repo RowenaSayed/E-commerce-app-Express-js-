@@ -4,10 +4,12 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const path = require('path');
- 
+const sessionMiddleware = require('./middleware/session');
+
 
 
 const app = express();
+app.use(sessionMiddleware)
 const PORT = process.env.PORT || 8000;
 
 mongoose.connect(process.env.MONGO_URI)
@@ -31,24 +33,23 @@ const faqRoutes=require('./routes/faq')
 // Use routes
 app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
-app.use('/api/categories', categoryRoutes);
+app.use('/api/cat', categoryRoutes);
 app.use('/api/promos', promoRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/tickets', ticketRoutes);
-app.use('/api/faq',faqRoutes);
+app.use('/api/faq', faqRoutes);
+app.use('/api/cart', cartRoutes);
 mongoose.connect(process.env.MONGO_URI)
     .then(() => {
-        // 3. السيرفر يشتغل فـقـط لما الداتابيز تنجح
-        console.log('✅ MongoDB Connected successfully');
+        console.log('MongoDB Connected successfully');
         
         const PORT = process.env.PORT || 8000;
         app.listen(PORT, () => {
-            console.log(`🚀 Server is running on port ${PORT}`);
+            console.log(`Server is running on port ${PORT}`);
         });
     })
     .catch((err) => {
-        // لو الاتصال فشل، اطبع السبب واقفل البرنامج
-        console.error('❌ Database connection error:', err);
+        console.error('Database connection error:', err);
     });

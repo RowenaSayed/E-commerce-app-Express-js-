@@ -1,8 +1,30 @@
-// //carts routes
-// const { getCart,
-//     addToCart,
-//     updateCartItem,
-//     removeCartItem,
-//     clearCart } = require('../controllers/carts');
-
-// const { auth, authorize } = require('../middleware/auth');
+//cart routes
+const express = require('express');
+const router = express.Router();
+const { getCart, addToCart, updateCartItem, clearCart, removeCartItem, addNewAddress,
+    applyPromotionCode,
+    deleteAddress,
+    getCartSummary,
+    getSavedAddresses,
+    getShippingOptions,
+    removePromotionCode,
+    updateAddress
+    
+} = require('../controllers/carts');
+const sessionMiddleware = require('../middleware/session');
+const { auth, authorize } = require('../middleware/auth');
+router.use(sessionMiddleware);
+router.get('/',  getCart);
+router.post('/add', addToCart);
+router.put('/update/:itemId', auth, updateCartItem);
+router.delete('/remove/:itemId', auth, removeCartItem);
+router.delete('/clear', auth, clearCart);   
+router.post('/address', auth, addNewAddress);
+router.put('/address/:addressId', auth, updateAddress);
+router.delete('/address/:addressId', auth, deleteAddress);  
+router.get('/addresses', auth, getSavedAddresses);
+router.get('/shipping-options', auth, getShippingOptions);
+router.post('/apply-promo', auth, applyPromotionCode);      
+router.delete('/remove-promo', auth, removePromotionCode);
+router.get('/summary', auth, getCartSummary);
+module.exports = router;

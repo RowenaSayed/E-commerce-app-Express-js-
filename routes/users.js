@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-// استدعاء الكونترولر الجديد
 const { 
     createUser, 
     login, 
@@ -23,7 +22,6 @@ router.post('/social-login', socialLogin); // تسجيل دخول سوشيال
 router.post('/verify-2fa', verify2FA);     // التحقق من كود OTP
 router.post('/forgot-password',forgotPassword);
 router.post('/reset-password/:token',resetPassword);
-// --- Protected Routes (تحتاج توكن) ---
 router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط يشوف كل اليوزرز
 router.get('/:id', auth, getUserById);                // المستخدم يشوف بياناته
 router.put('/:id', auth, updateUserById);             // المستخدم يعدل بياناته

@@ -53,7 +53,7 @@ const createUser = async (req, res) => {
         await newUser.save();
 
         // تم إيقاف إرسال الإيميل مؤقتاً لتجنب توقف السيرفر
-        await sendEmail(newUser.email, verificationToken); 
+        // await sendEmail(newUser.email, verificationToken); 
 
         res.status(201).json({ 
             message: 'User created successfully.', 
@@ -231,11 +231,11 @@ const forgotPassword = async (req, res) => {
         await user.save();
 
         
-        await sendEmail({
-            email: user.email,
-            subject: 'Password Reset Token',
-            message: `Your token is: ${resetToken}`
-        });
+        // await sendEmail({
+        //     email: user.email,
+        //     subject: 'Password Reset Token',
+        //     message: `Your token is: ${resetToken}`
+        // });
         
 
         res.status(200).json({ 

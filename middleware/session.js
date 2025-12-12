@@ -1,5 +1,5 @@
 const session = require('express-session');
-const MongoStore = require('connect-mongo');
+const { MongoStore } = require('connect-mongo');
 const mongoose = require('mongoose');
 
 const sessionMiddleware = session({
@@ -8,7 +8,7 @@ const sessionMiddleware = session({
     saveUninitialized: false,
     store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
     cookie: {
-        maxAge: 1000 * 60 * 60 * 24 * 7, 
+        maxAge: 1000 * 60 * 60 * 24 * 7,
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production'
     }
