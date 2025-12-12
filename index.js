@@ -1,9 +1,11 @@
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
+const path = require('path');
  
-dotenv.config();
+
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -25,7 +27,7 @@ const wishlistRoutes = require('./routes/wishlist');
 const cartRoutes = require('./routes/carts');
 const orderRoutes = require('./routes/orders');
 const ticketRoutes = require('./routes/tickets');
-
+const faqRoutes=require('./routes/faq')
 // Use routes
 app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
@@ -35,7 +37,18 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/tickets', ticketRoutes);
-
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+app.use('/api/faq',faqRoutes);
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => {
+        // 3. السيرفر يشتغل فـقـط لما الداتابيز تنجح
+        console.log('✅ MongoDB Connected successfully');
+        
+        const PORT = process.env.PORT || 8000;
+        app.listen(PORT, () => {
+            console.log(`🚀 Server is running on port ${PORT}`);
+        });
+    })
+    .catch((err) => {
+        // لو الاتصال فشل، اطبع السبب واقفل البرنامج
+        console.error('❌ Database connection error:', err);
+    });

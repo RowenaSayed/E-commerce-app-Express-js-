@@ -1,13 +1,32 @@
 const express = require('express');
 const router = express.Router();
-const { createUser, login, getUserById, updateUserById, deleteUserById, listUsers } = require('../controllers/users');
-const { auth, authorize } = require('../middleware/auth');
+// استدعاء الكونترولر الجديد
+const { 
+    createUser, 
+    login, 
+    getUserById, 
+    updateUserById, 
+    deleteUserById, 
+    listUsers,
+    socialLogin,
+    verify2FA ,
+    forgotPassword,
+    resetPassword
+} = require('../controllers/users'); // تأكدي إن اسم ملف الكونترولر users.js
 
-router.post('/register', createUser);
-router.post('/login', login);
-router.get('/', auth, authorize('admin'), listUsers);
-router.get('/:id', auth, getUserById);
-router.put('/:id', auth, updateUserById);
-router.delete('/:id', auth, deleteUserById);
+const { auth, authorize } = require('../middleware/auth'); // الميدل وير بتاعنا
+
+// --- Public Routes (متاحة للجميع) ---
+router.post('/register', createUser);      // إنشاء حساب
+router.post('/login', login);              // تسجيل دخول
+router.post('/social-login', socialLogin); // تسجيل دخول سوشيال
+router.post('/verify-2fa', verify2FA);     // التحقق من كود OTP
+router.post('/forgot-password',forgotPassword);
+router.post('/reset-password/:token',resetPassword);
+// --- Protected Routes (تحتاج توكن) ---
+router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط يشوف كل اليوزرز
+router.get('/:id', auth, getUserById);                // المستخدم يشوف بياناته
+router.put('/:id', auth, updateUserById);             // المستخدم يعدل بياناته
+router.delete('/:id', auth, authorize('admin'), deleteUserById); // الأدمن يحذف
 
 module.exports = router;

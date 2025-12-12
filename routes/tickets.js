@@ -1,13 +1,32 @@
 const express = require('express');
 const router = express.Router();
-const { createTicket, getTickets, getTicketById, updateTicket, addResponse, deleteTicket } = require('../controllers/tickets');
-const { auth, authorize } = require('../middleware/auth');
+const { auth, authorize } = require('../middleware/auth'); // تأكد من المسار
 
+const { 
+    createTicket, 
+    getTickets, 
+    getTicketById, 
+    updateTicket, 
+    addResponse, 
+    deleteTicket 
+} = require('../controllers/tickets');
+
+// 1. إنشاء تذكرة (Auth Required)
 router.post('/', auth, createTicket);
+
+// 2. عرض التذاكر
 router.get('/', auth, getTickets);
+
+// 3. عرض تذكرة واحدة
 router.get('/:id', auth, getTicketById);
-router.put('/:id', auth, updateTicket);
-router.post('/:id/response', auth, authorize(['support', 'admin']), addResponse);
-router.delete('/:id', auth, authorize(['support', 'admin']), deleteTicket);
+
+// 4. إضافة رد
+router.post('/:id/response', auth, addResponse);
+
+// 5. تعديل التذكرة (Admin/Support Only)
+router.put('/:id', auth, authorize('admin', 'support'), updateTicket);
+
+// 6. حذف التذكرة
+router.delete('/:id', auth, deleteTicket);
 
 module.exports = router;
