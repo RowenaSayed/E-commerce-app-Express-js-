@@ -1,31 +1,42 @@
-const Ticket = require('../models/tickets'); 
-const { sendTicketStatusEmail } = require('../utilities/email');   
+const Ticket = require('../models/tickets');
+// تأكدي من مسار ملف الإيميل الصحيح
+const { sendTicketStatusEmail } = require('../utilities/email'); 
 
 // 1. Create Ticket
 const createTicket = async (req, res) => {
     try {
-        // 1. الحصول على ID المستخدم من التوكن
-        const userId = req.user.id; 
+        const user = req.user; // مستخرج من التوكن عبر middleware
 
-        console.log("User making request:", req.user); 
-
-        // التحقق من المصادقة (رغم أن الـ auth middleware يقوم بذلك، لكن للضمان)
-        if (!req.user) {
-            return res.status(401).json({ message: "Authentication required. Please login first." });
+        // التحقق من المصادقة (لضمان وجود user id)
+        if (!user || (!user._id && !user.id)) {
+            return res.status(401).json({ message: "Authentication required." });
         }
+        
+        const userId = user._id || user.id;
 
         const { 
             subject, message, orderNumber, category, 
             name, email, phone 
         } = req.body;
 
-        // التحقق من البيانات المطلوبة
+        // التحقق من البيانات المطلوبة (FR-CS1)
         if (!subject || !message || !name || !email || !phone) {
             return res.status(400).json({ message: "All fields (subject, message, name, email, phone) are required" });
         }
 
+        // ==========================================================
+        // 👇👇 منطق توليد رقم التذكرة يدويًا هنا (New Logic) 👇👇
+        // ==========================================================
+        const prefix = "TCK";
+        const random = Math.floor(1000 + Math.random() * 9000); // 4 أرقام عشوائية
+        const timestamp = Date.now().toString().slice(-4);      // آخر 4 أرقام من الوقت
+        const generatedTicketNumber = `${prefix}-${timestamp}-${random}`;
+        // مثال: TCK-8329-1023
+        // ==========================================================
+
         const newTicket = new Ticket({
-            user: userId, // ✅ استخدام userId (req.user.id)
+            user: userId,
+            ticketNumber: generatedTicketNumber, // 👈 إرسال الرقم المولد
             
             contactDetails: {
                 name, email, phone
@@ -33,8 +44,7 @@ const createTicket = async (req, res) => {
             subject,
             message,
             orderNumber: orderNumber || null,
-            // تأكد أن category الممررة من الـ body مطابقة للـ enum
-            category: category || "Other", 
+            category: category || "Other", // FR-CS3
             status: 'Open'
         });
 
@@ -47,19 +57,21 @@ const createTicket = async (req, res) => {
     }
 };
 
-// 2. Get Tickets
+// ... (باقي الدوال: getTickets, getTicketById, updateTicket, addResponse, deleteTicket كما هي في الكود السابق الخاص بك، لا تحتاج لتغيير جوهري إلا التأكد من استخدام userId بأمان كما فعلنا في Orders)
+
+// 2. Get Tickets (مع تأمين استخراج الـ ID)
 const getTickets = async (req, res) => {
     try {
+        const userId = req.user._id || req.user.id;
         let tickets;
-        // الأدمن والدعم يرون كل التذاكر
+        
         if (req.user.role === "admin" || req.user.role === "support") {
             tickets = await Ticket.find()
                 .populate('user', 'name email')
                 .populate('assignedTo', 'name')
                 .sort({ createdAt: -1 });
         } else {
-            // العميل يرى تذاكره فقط
-            tickets = await Ticket.find({ user: req.user.id }) // ✅ تصحيح: استخدام req.user.id
+            tickets = await Ticket.find({ user: userId }) 
                 .populate('assignedTo', 'name')
                 .sort({ createdAt: -1 });
         }
@@ -69,9 +81,11 @@ const getTickets = async (req, res) => {
     }
 };
 
-// 3. Get Ticket By ID
+// 3. Get Ticket By ID (مع تأمين استخراج الـ ID)
 const getTicketById = async (req, res) => {
     try {
+        const userId = (req.user._id || req.user.id).toString();
+
         const ticket = await Ticket.findById(req.params.id)
             .populate('user', 'name email phone')
             .populate('assignedTo', 'name')
@@ -79,8 +93,7 @@ const getTicketById = async (req, res) => {
 
         if (!ticket) return res.status(404).json({ message: "Ticket not found" });
 
-        // التحقق من الصلاحية: (مالك التذكرة أو Admin/Support)
-        const isOwner = ticket.user._id.toString() === req.user.id.toString(); // ✅ تصحيح: استخدام req.user.id
+        const isOwner = ticket.user._id.toString() === userId;
         const isAdminOrSupport = req.user.role === "admin" || req.user.role === "support";
 
         if (!isAdminOrSupport && !isOwner) {
@@ -92,98 +105,95 @@ const getTicketById = async (req, res) => {
     }
 };
 
-// 4. Update Ticket (Status or Assign)
-// 4. Update Ticket (Status or Assign)
-// 4. Update Ticket (Status or Assign)
+// 4. Update Ticket (Admin/Support Only) - FR-CS6 Notification Logic Included
 const updateTicket = async (req, res) => {
     try {
         const ticket = await Ticket.findById(req.params.id);
         if (!ticket) return res.status(404).json({ message: "Ticket not found" });
 
-        // الحماية: فقط الدعم والأدمن
         if (req.user.role !== "admin" && req.user.role !== "support") {
             return res.status(403).json({ message: "Access denied." });
         }
 
         const allowedUpdates = ["status", "assignedTo", "category"];
-        const oldStatus = ticket.status; // 🛑 1. نلتقط الحالة القديمة قبل التعديل
+        const oldStatus = ticket.status;
 
         allowedUpdates.forEach(field => {
             if (req.body[field] !== undefined) {
-                // 🛑 2. نستخدم set() لتطبيق التعديلات (هذه الطريقة أكثر أمانًا)
-                // بدلاً من ticket[field] = req.body[field];
                 ticket.set(field, req.body[field]);
             }
         });
 
-        const statusChanged = oldStatus !== ticket.status; // 🛑 3. نقارن الحالة القديمة بالجديدة
+        const statusChanged = oldStatus !== ticket.status;
 
-        // 🛑 4. تشغيل التحقق يدوياً قبل الحفظ (لإظهار خطأ validation إن وجد)
-        await ticket.validate(); 
-        
-        await ticket.save(); // 5. الحفظ الفعلي
+        // التحقق من صحة البيانات قبل الحفظ
+        try {
+            await ticket.validate();
+        } catch (validationErr) {
+             return res.status(400).json({ message: "Validation Error", errors: validationErr.errors });
+        }
 
-        if (statusChanged && sendTicketStatusEmail) {
-            await sendTicketStatusEmail(
-                ticket.contactDetails.email, // إيميل العميل
-                ticket.contactDetails.name,  // اسم العميل
-                ticket._id,                 // استخدام ID Mongoose
-                ticket.status                // الحالة الجديدة
-            );
+        await ticket.save();
+
+        // FR-CS6: Notify user on status change
+        if (statusChanged) {
+            // نتأكد أن دالة الإيميل مستوردة وموجودة لتجنب انهيار السيرفر
+            if (typeof sendTicketStatusEmail === 'function') {
+                try {
+                    await sendTicketStatusEmail(
+                        ticket.contactDetails.email, 
+                        ticket.contactDetails.name, 
+                        ticket.ticketNumber, // استخدام الرقم المولد الجديد
+                        ticket.status
+                    );
+                } catch (emailErr) {
+                    console.error("Email notification failed:", emailErr.message);
+                    // لا نوقف الرد على العميل إذا فشل الإيميل
+                }
+            }
         }
         
         res.json({ message: "Ticket updated successfully", ticket });
     } catch (err) {
-        // 🛑 تحسين معالجة الأخطاء لإظهار خطأ الـ Validation بوضوح
-        console.error("Update Ticket Error:", err);
-        
-        // التحقق من نوع الخطأ: إذا كان خطأ Mongoose Validation
-        if (err.name === 'ValidationError') {
-            // نُرجع خطأ 400 ونعرض تفاصيل خطأ الـ Validation
-            return res.status(400).json({ message: "Validation Error: Data is invalid.", errors: err.errors });
-        }
-        // لأي خطأ آخر (مثل خطأ في الاتصال بالسيرفر)
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
-// 5. Add Response
+
+// 5. Add Response (FR-CS2 support)
 const addResponse = async (req, res) => {
     try {
         const ticket = await Ticket.findById(req.params.id);
         if (!ticket) return res.status(404).json({ message: "Ticket not found" });
 
         const user = req.user;
+        const userId = user._id || user.id;
         const { message } = req.body;
         
         if (!message) return res.status(400).json({ message: "Message is required" });
 
-        // ✅ تصحيح: توحيد الأسماء لتطابق الأحرف الصغيرة في الـ Schema
         let senderRole = user.role; 
-        
-        // إذا لم يكن الدور أحد الأدوار المعرفة، يُعتبر buyer
+        // fallback للرتب غير المعروفة
         if (!["admin", "support", "seller", "buyer"].includes(senderRole)) {
             senderRole = "buyer";
         }
 
-        // إضافة الرد
         ticket.responses.push({ 
-            sender: user.id, 
+            sender: userId, 
             role: senderRole, 
             message 
         });
 
-        // تحديث الحالة تلقائياً
-        const isStaff = user.role === "support" || user.role === "admin" || user.role === "seller";
+        // تحديث الحالة تلقائيًا بناءً على من رد
+        const isStaff = ["support", "admin", "seller"].includes(user.role);
 
         if (isStaff) {
             if (ticket.status !== "Closed") ticket.status = "Waiting for Customer Response";
         } else {
-            // العميل يرد
+            // العميل هو الذي رد
             if (ticket.status !== "Closed") ticket.status = "In Progress";
         }
 
         await ticket.save();
-
         res.json({ message: "Response added", ticket });
     } catch (err) {
         res.status(500).json({ message: "Server error", error: err.message });
@@ -196,8 +206,8 @@ const deleteTicket = async (req, res) => {
         const ticket = await Ticket.findById(req.params.id);
         if (!ticket) return res.status(404).json({ message: "Ticket not found" });
 
-        // التحقق من الصلاحية: (Admin أو مالك التذكرة)
-        const isOwner = ticket.user.toString() === req.user.id.toString(); 
+        const userId = (req.user._id || req.user.id).toString();
+        const isOwner = ticket.user.toString() === userId; 
 
         if (req.user.role !== "admin" && !isOwner) {
             return res.status(403).json({ message: "Access denied" });

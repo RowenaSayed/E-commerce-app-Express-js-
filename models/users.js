@@ -70,7 +70,8 @@ const UserSchema = new Schema({
     
     // أكواد احتياطية للدخول في حال ضياع الهاتف (Backup Codes)
     twoFactorRecoveryCodes: [String],
-
+    // أضيفي هذا الحقل داخل UserSchema
+isBanned: { type: Boolean, default: false }, // FR-A23
     // Notification Preferences
     notificationPreferences: {
         email: { type: Boolean, default: true },
