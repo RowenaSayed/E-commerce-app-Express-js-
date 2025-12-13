@@ -1,24 +1,21 @@
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
-const dotenv = require('dotenv');
 const cors = require('cors');
 const path = require('path');
 const sessionMiddleware = require('./middleware/session');
 
-
-
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-
+// إعداد CORS و session
 app.set('trust proxy', 1);
 app.use(cors({
-    origin: true, 
+    origin: true,
     credentials: true
-})); app.use(express.json());
+}));
+app.use(express.json());
 app.use(sessionMiddleware);
-
 
 // Import routes
 const userRoutes = require('./routes/users');
@@ -30,7 +27,8 @@ const wishlistRoutes = require('./routes/wishlist');
 const cartRoutes = require('./routes/carts');
 const orderRoutes = require('./routes/orders');
 const ticketRoutes = require('./routes/tickets');
-const faqRoutes=require('./routes/faq')
+const faqRoutes = require('./routes/faq');
+
 // Use routes
 app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
@@ -43,22 +41,18 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/faq', faqRoutes);
 app.use('/api/cart', cartRoutes);
 
-// ======= Test route =======
+// Test route
 app.get('/test-session', (req, res) => {
     if (!req.session.views) req.session.views = 0;
     req.session.views++;
     res.json({ views: req.session.views, sessionID: req.sessionID, session: req.session });
 });
-//===========================
+
 mongoose.connect(process.env.MONGO_URI)
     .then(() => {
         console.log('MongoDB Connected successfully');
-        
-        const PORT = process.env.PORT || 8000;
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         });
     })
-    .catch((err) => {
-        console.error('Database connection error:', err);
-    });
+    .catch(err => console.error('Database connection error:', err));

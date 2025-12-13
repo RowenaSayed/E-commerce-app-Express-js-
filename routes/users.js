@@ -12,21 +12,26 @@ const {
     forgotPassword,
     resetPassword,
     verifyEmail
-} = require('../controllers/users'); // تأكدي إن اسم ملف الكونترولر users.js
+} = require('../controllers/users');
 
-const { auth, authorize } = require('../middleware/auth'); // الميدل وير بتاعنا
+const { auth, authorize } = require('../middleware/auth');
 
-// --- Public Routes (متاحة للجميع) ---
-router.post('/register', createUser);      // إنشاء حساب
-router.post('/login', login);              // تسجيل دخول
-router.post('/social-login', socialLogin); // تسجيل دخول سوشيال
-router.post('/verify-2fa', verify2FA);     // التحقق من كود OTP
+// --- 1. 🛑 المسارات الثابتة (يجب أن تأتي أولاً) 🛑
+router.post('/login', login);  
+router.post('/register', createUser); 
+router.post('/social-login', socialLogin); 
+router.post('/verify-2fa', verify2FA);
 router.post('/forgot-password',forgotPassword);
 router.post('/reset-password/:token',resetPassword);
-router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط يشوف كل اليوزرز
-router.get('/:id', auth, getUserById);                // المستخدم يشوف بياناته
-router.put('/:id', auth, updateUserById);             // المستخدم يعدل بياناته
+router.get('/verify/:token', verifyEmail); // ✅ تم نقل المسار الثابت هنا
+
+// --- 2. 🛡️ المسارات المحمية العامة والخاصة ---
+router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط يشوف كل اليوزرز (ثابت)
+
+// --- 3. 🚀 المسارات الديناميكية (يجب أن تأتي أخيراً) 🚀
+router.get('/:id', auth, getUserById); // المستخدم يشوف بياناته
+router.put('/:id', auth, updateUserById);  // المستخدم يعدل بياناته
 router.delete('/:id', auth, authorize('admin'), deleteUserById); // الأدمن يحذف
-router.get('/verify/:token', verifyEmail);
+
 
 module.exports = router;
