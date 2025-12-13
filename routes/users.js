@@ -10,7 +10,8 @@ const {
     socialLogin,
     verify2FA ,
     forgotPassword,
-    resetPassword
+    resetPassword,
+    verifyEmail
 } = require('../controllers/users'); // تأكدي إن اسم ملف الكونترولر users.js
 
 const { auth, authorize } = require('../middleware/auth'); // الميدل وير بتاعنا
@@ -26,5 +27,6 @@ router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط ي�
 router.get('/:id', auth, getUserById);                // المستخدم يشوف بياناته
 router.put('/:id', auth, updateUserById);             // المستخدم يعدل بياناته
 router.delete('/:id', auth, authorize('admin'), deleteUserById); // الأدمن يحذف
+router.get('/verify/:token', verifyEmail);
 
 module.exports = router;

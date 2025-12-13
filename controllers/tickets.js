@@ -1,5 +1,5 @@
 const Ticket = require('../models/tickets'); 
- const { sendStatusChangeEmail } = require('../utilities/email');   
+ const { sendTicketStatusEmail } = require('../utilities/email');   
 
 // 1. Create Ticket
 const createTicket = async (req, res) => {
@@ -115,15 +115,14 @@ const updateTicket = async (req, res) => {
         // 👇👇👇 هنا التصحيح: شلنا النقاط (...) وحطينا البيانات الصح 👇👇👇
         if (statusChanged) {
             // نتأكد إن دالة الإيميل موجودة قبل ما نستخدمها
-            if (typeof sendStatusChangeEmail === 'function') {
-                await sendStatusChangeEmail(
+                await sendTicketStatusEmail(
                     ticket.contactDetails.email, // إيميل العميل
                     ticket.contactDetails.name,  // اسم العميل
                     ticket.ticketNumber,         // رقم التذكرة
                     ticket.status                // الحالة الجديدة
                 );
             }
-        }
+        
         res.json({ message: "Ticket updated successfully", ticket });
     } catch (err) {
         console.error(err);
