@@ -8,10 +8,8 @@ router.get('/', auth, getOrders);
 router.get('/:id', auth, getOrderById);
 
 // Cancel Order (User)
-router.put('/:id/cancel', auth, async (req, res) => {
-    req.body.status = 'Cancelled';
-    updateOrderStatus(req, res);
-});
+router.put('/:id/cancel', auth, cancelOrder);
+// Request Return (User)
 router.post('/:id/return', auth, requestReturn);
 //for admin
 router.put('/:id', auth,authorize('admin','support'), updateOrderStatus);

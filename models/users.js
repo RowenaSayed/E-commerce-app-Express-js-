@@ -31,7 +31,7 @@ const UserSchema = new Schema({
         } 
     },
 
-    role: { type: String, enum: ['admin', 'support', 'buyer'], default: 'buyer' },
+    role: { type: String, enum: ['admin', 'support', 'buyer','seller'], default: 'buyer' },
     profilePicture: String,
     addresses: [AddressSchema],
 
