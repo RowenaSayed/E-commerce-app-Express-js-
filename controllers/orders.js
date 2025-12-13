@@ -1,10 +1,8 @@
 const Order = require('../models/orders');
 const Promo = require('../models/promos');
 const Product = require('../models/products');
-// استدعاء دالة الإيميل (تأكدي أن المسار صحيح)
 const { sendOrderStatusEmail } = require('../utilities/email');
 
-// 1. Create Order (مع منطق الخصم والمخزون)
 const createOrder = async (req, res) => {
     try {
         const user = req.user;
@@ -15,7 +13,6 @@ const createOrder = async (req, res) => {
         if (!paymentMethod) return res.status(400).json({ message: "Payment method required" });
 
         let subtotal = 0;
-        // التحقق من المنتجات والمخزون وحساب المجموع
         for (const item of items) {
             const product = await Product.findById(item.product);
             if (!product) return res.status(404).json({ message: `Product ${item.product} not found` });
@@ -23,12 +20,10 @@ const createOrder = async (req, res) => {
             
             subtotal += item.price * item.quantity;
             
-            // خصم الكمية من المخزون
             product.stockQuantity -= item.quantity;
             await product.save();
         }
 
-        // منطق الخصم (Promo Code)
         let discount = 0;
         if (promo) {
             const promoDoc = await Promo.findOne({ code: promo, active: true });

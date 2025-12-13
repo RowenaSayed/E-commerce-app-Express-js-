@@ -1,9 +1,10 @@
-const crypto = require('crypto');
 const User = require('../models/users'); 
+const Cart = require('../models/carts');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { sendResetPasswordEmail } = require('../utilities/email');
-const {sendWelcomeEmail}=require('../utilities/email');
+const { sendWelcomeEmail } = require('../utilities/email');
 const secret = process.env.JWT_SECRET;
 
 const sanitizeUser = (user) => {
@@ -76,38 +77,67 @@ const login = async (req, res) => {
         const user = await User.findOne({ email });
         if (!user) return res.status(404).json({ message: 'User not found' });
 
-        // إذا كان مسجلاً بجوجل فقط وليس لديه باسورد
         if (!user.password) {
             return res.status(400).json({ message: 'Please login using your social account' });
         }
 
-        // التحقق من الباسورد
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ message: 'Invalid password' });
 
-        // التحقق من تفعيل الإيميل
         if (!user.isEmailVerified) {
             return res.status(403).json({ message: 'Please verify your email address first.' });
         }
 
-        // (2FA Logic) التحقق من المصادقة الثنائية
         if (user.twoFactorEnabled) {
-            return res.status(200).json({ 
-                message: '2FA Verification Required', 
-                require2FA: true, 
+            return res.status(200).json({
+                message: '2FA Verification Required',
+                require2FA: true,
                 userId: user._id,
-                method: user.twoFactorMethod 
+                method: user.twoFactorMethod
             });
         }
 
-        // إذا كل شيء تمام، نرسل التوكن
+        // =====================
+        // Merge Guest Cart
+        // =====================
+        const guestCart = await Cart.findOne({ sessionId: req.sessionID });
+        const userCart = await Cart.findOne({ user: user._id });
+        console.log('User Cart:', userCart);
+            console.log('Guest Cart:', guestCart);
+        if (guestCart) {
+            if (userCart) {
+                guestCart.items.forEach(gItem => {
+                    const index = userCart.items.findIndex(uItem => uItem.product.toString() === gItem.product.toString());
+                    if (index > -1) {
+                        userCart.items[index].quantity += gItem.quantity;
+                    } else {
+                        userCart.items.push(gItem);
+                    }
+                });
+                await userCart.save();
+                await Cart.deleteOne({ _id: guestCart._id });
+            } else {
+                guestCart.user = user._id;
+                guestCart.sessionId = undefined; 
+                await guestCart.save();
+            }
+        }
+
+        // =====================
+        // Issue token
+        // =====================
         const token = jwt.sign({ id: user._id, role: user.role }, secret, { expiresIn: '1d' });
-        res.status(200).json({ message: 'Login successful', token, user: sanitizeUser(user) });
+        res.status(200).json({
+            message: 'Login successful',
+            token,
+            user: sanitizeUser(user)
+        });
 
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
+
 
 // 3. Get User
 const getUserById = async (req, res) => {

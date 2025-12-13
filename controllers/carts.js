@@ -146,6 +146,7 @@ const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
 
 const getCart = async (req, res) => {
     try {
+        console.log(req.sessionID);
         const query = {
             $or: [
                 req.user ? { user: req.user.id } : null,
@@ -247,7 +248,7 @@ const getCartSummary = async (req, res) => {
             const validation = await validateAndApplyPromotion(
                 discountCode,
                 cart,
-                req.user?._id
+                req.user?.id
             );
 
             if (validation.valid) {
@@ -576,7 +577,7 @@ const applyPromotionCode = async (req, res) => {
         const validation = await validateAndApplyPromotion(
             promotionCode,
             cart,
-            req.user?._id
+            req.user?.id
         );
 
         if (!validation.valid) {
@@ -592,12 +593,7 @@ const applyPromotionCode = async (req, res) => {
         cart.promotionType = validation.promotion.type;
         await cart.save();
 
-        // Update promotion usage count
-        await Promotion.findByIdAndUpdate(
-            validation.promotion._id,
-            { $inc: { usageCount: 1 } }
-        );
-
+      
         // Get governate for calculation (if available)
         let governate = null;
         if (req.query.governateId) {
@@ -689,8 +685,8 @@ const addToCart = async (req, res) => {
         const product = await Product.findById(product_id);
         if (!product) return res.status(404).json({ message: 'Product not found' });
         if (product.stockQuantity < qty) return res.status(400).json({ message: 'Not enough stock' });
-
-        const query = req.user?._id ? { user: req.user.id } : { sessionId: req.sessionID };
+        console.log(req.sessionID);
+        const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         let cart = await Cart.findOne(query);
 
         if (!cart) {
@@ -727,7 +723,7 @@ const updateCartItem = async (req, res) => {
         if (!product) return res.status(404).json({ message: 'Product not found' });
         if (quantity > product.stockQuantity) return res.status(400).json({ message: 'Not enough stock' });
 
-        const query = req.user?._id ? { user: req.user.id } : { sessionId: req.sessionID };
+        const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         const cart = await Cart.findOne(query);
         if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
@@ -754,7 +750,7 @@ const removeCartItem = async (req, res) => {
         const { product_id } = req.body;
         if (!product_id) return res.status(400).json({ message: 'Product ID required' });
 
-        const query = req.user?._id ? { user: req.user.id } : { sessionId: req.sessionID };
+        const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         const cart = await Cart.findOne(query);
         if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
@@ -771,7 +767,7 @@ const removeCartItem = async (req, res) => {
 
 const clearCart = async (req, res) => {
     try {
-        const query = req.user?._id ? { user: req.user.id } : { sessionId: req.sessionID };
+        const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         const cart = await Cart.findOne(query);
         if (!cart) return res.status(404).json({ message: 'Cart not found' });
 

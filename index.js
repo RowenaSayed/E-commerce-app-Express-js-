@@ -9,15 +9,16 @@ const sessionMiddleware = require('./middleware/session');
 
 
 const app = express();
-app.use(sessionMiddleware)
 const PORT = process.env.PORT || 8000;
 
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("MongoDB connected"))
-    .catch(err => console.error("MongoDB connection error:", err));
 
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1);
+app.use(cors({
+    origin: true, 
+    credentials: true
+})); app.use(express.json());
+app.use(sessionMiddleware);
+
 
 // Import routes
 const userRoutes = require('./routes/users');
@@ -41,6 +42,14 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/faq', faqRoutes);
 app.use('/api/cart', cartRoutes);
+
+// ======= Test route =======
+app.get('/test-session', (req, res) => {
+    if (!req.session.views) req.session.views = 0;
+    req.session.views++;
+    res.json({ views: req.session.views, sessionID: req.sessionID, session: req.session });
+});
+//===========================
 mongoose.connect(process.env.MONGO_URI)
     .then(() => {
         console.log('MongoDB Connected successfully');
