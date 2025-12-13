@@ -1,4 +1,6 @@
 const Wishlist = require('../models/wishlist');
+const Product = require('../models/products');
+const mongoose = require('mongoose');
 
 const getWishlist = async (req, res) => {
     try {
@@ -11,26 +13,49 @@ const getWishlist = async (req, res) => {
 
 const addToWishlist = async (req, res) => {
     try {
-        const { product_id } = req.body;
-        if (!product_id) return res.status(400).json({ message: 'Product ID required' });
+        const { product_id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(product_id)) {
+            return res.status(400).json({ message: "Invalid product id" });
+        }
+
+        const product = await Product.findById(product_id);
+        if (!product) {
+            return res.status(404).json({ message: "Product not found" });
+        }
 
         let wishlist = await Wishlist.findOne({ user_id: req.user.id });
+
         if (!wishlist) {
-            wishlist = new Wishlist({ user_id: req.user.id, product_ids: [product_id] });
-        } else if (!wishlist.product_ids.includes(product_id)) {
-            wishlist.product_ids.push(product_id);
+            wishlist = new Wishlist({
+                user_id: req.user.id,
+                product_ids: [product_id]
+            });
+        } else {
+            const exists = wishlist.product_ids.some(
+                id => id.toString() === product_id
+            );
+
+            if (!exists) {
+                wishlist.product_ids.push(product_id);
+            }
         }
 
         await wishlist.save();
-        res.json(wishlist);
+
+        res.status(200).json({
+            message: "Product added to wishlist",
+            wishlist
+        });
+
     } catch (err) {
-        res.status(500).json({ message: 'Server error' });
+        res.status(500).json({ message: "Server error" });
     }
 };
 
 const removeFromWishlist = async (req, res) => {
     try {
-        const { product_id } = req.body;
+        const { product_id } = req.params;
         const wishlist = await Wishlist.findOne({ user_id: req.user.id });
         if (!wishlist) return res.status(404).json({ message: 'Wishlist not found' });
 

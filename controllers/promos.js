@@ -53,7 +53,7 @@ const createPromo = async (req, res) => {
             endDate,
             usageLimitPerUser: usageLimitPerUser ?? null,
             totalUsageLimit: totalUsageLimit ?? null,
-            createdBy: req.user._id
+            createdBy: req.user.id
         });
 
         res.status(201).json({
@@ -92,7 +92,7 @@ const getPublicPromos = async (req, res) => {
 const getAdminPromos = async (req, res) => {
     try {
         const promos = await Promotion.find({
-            createdBy: req.user._id
+            createdBy: req.user.id
         }).sort({ createdAt: -1 });
 
         res.status(200).json({ promos });
