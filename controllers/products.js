@@ -1,12 +1,37 @@
 const Product = require('../models/products');
 
-// 1. Create Product (FR-A3, FR-A6)
+// ================================================
+// HELPER FUNCTIONS
+// ================================================
+
+const hasProductAccess = (user, product, action = 'view') => {
+    // Admin has full access
+    if (user.role === 'admin') return true;
+
+    // Seller can only access their own products
+    if (user.role === 'seller') {
+        return product.seller.toString() === user.id.toString();
+    }
+
+    return false;
+};
+
+const isAdmin = (user) => user && user.role === 'admin';
+const isSeller = (user) => user && user.role === 'seller';
+const isAdminOrSeller = (user) => user && (user.role === 'admin' || user.role === 'seller');
+
+// ================================================
+// 1. CREATE PRODUCT (Admin & Seller)
+// ================================================
 const createProduct = async (req, res) => {
     try {
         const user = req.user;
 
-        if (!user || (user.role !== 'admin' && user.role !== 'seller')) {
-            return res.status(403).json({ message: "Access denied: Only admin or seller can add products" });
+        if (!isAdminOrSeller(user)) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied: Only admin or seller can add products"
+            });
         }
 
         let imagePaths = [];
@@ -31,21 +56,52 @@ const createProduct = async (req, res) => {
 
         if (!name || !category || !condition || !price || !description) {
             return res.status(400).json({
+                success: false,
                 message: "Missing required fields: name, category, condition, price, description"
             });
         }
 
-        if (condition === "Used" && (!usedDetails || !usedDetails.deviceConditionDescription)) {
+        // Parse JSON fields if they're strings
+        const parsedUsedDetails = usedDetails ?
+            (typeof usedDetails === 'string' ? JSON.parse(usedDetails) : usedDetails) :
+            undefined;
+
+        const parsedImportedDetails = importedDetails ?
+            (typeof importedDetails === 'string' ? JSON.parse(importedDetails) : importedDetails) :
+            undefined;
+
+        const parsedTechnicalSpecs = technicalSpecs ?
+            (typeof technicalSpecs === 'string' ? JSON.parse(technicalSpecs) : technicalSpecs) :
+            {};
+
+        const parsedDimensions = dimensions ?
+            (typeof dimensions === 'string' ? JSON.parse(dimensions) : dimensions) :
+            {};
+
+        const parsedWeight = weight ?
+            (typeof weight === 'string' ? JSON.parse(weight) : weight) :
+            {};
+
+        const parsedWarranty = warranty ?
+            (typeof warranty === 'string' ? JSON.parse(warranty) : warranty) :
+            { type: "None" };
+
+        if (condition === "Used" && (!parsedUsedDetails || !parsedUsedDetails.deviceConditionDescription)) {
             return res.status(400).json({
+                success: false,
                 message: "Used details required for used products"
             });
         }
 
-        if (condition === "Imported" && (!importedDetails || !importedDetails.countryOfOrigin)) {
+        if (condition === "Imported" && (!parsedImportedDetails || !parsedImportedDetails.countryOfOrigin)) {
             return res.status(400).json({
+                success: false,
                 message: "Imported details required for imported products"
             });
         }
+
+        // Sellers cannot set isFeatured to true
+        const finalIsFeatured = user.role === 'admin' ? (isFeatured || false) : false;
 
         const newProduct = await Product.create({
             seller: user.id,
@@ -54,18 +110,18 @@ const createProduct = async (req, res) => {
             category, subCategory,
             brand, sku,
             condition,
-            price,
-            discount: discount || 0,
-            stockQuantity: stockQuantity || 0,
-            lowStockThreshold: lowStockThreshold || 5,
-            usedDetails: condition === "Used" ? usedDetails : undefined,
-            importedDetails: condition === "Imported" ? importedDetails : undefined,
-            technicalSpecs: technicalSpecs ? JSON.parse(technicalSpecs) : {},
-            dimensions: dimensions ? JSON.parse(dimensions) : {},
-            weight: weight ? JSON.parse(weight) : {},
-            warranty: warranty ? JSON.parse(warranty) : { type: "None" },
+            price: Number(price),
+            discount: discount ? Number(discount) : 0,
+            stockQuantity: stockQuantity ? Number(stockQuantity) : 0,
+            lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : 5,
+            usedDetails: condition === "Used" ? parsedUsedDetails : undefined,
+            importedDetails: condition === "Imported" ? parsedImportedDetails : undefined,
+            technicalSpecs: parsedTechnicalSpecs,
+            dimensions: parsedDimensions,
+            weight: parsedWeight,
+            warranty: parsedWarranty,
             images: imagePaths,
-            isFeatured: isFeatured || false,
+            isFeatured: finalIsFeatured,
             visibility: visibility || "Published"
         });
 
@@ -90,7 +146,9 @@ const createProduct = async (req, res) => {
     }
 };
 
-// 2. Update Product (FR-A4)
+// ================================================
+// 2. UPDATE PRODUCT (Admin & Seller - Owner Only)
+// ================================================
 const updateProduct = async (req, res) => {
     try {
         const user = req.user;
@@ -101,7 +159,7 @@ const updateProduct = async (req, res) => {
             message: "Product not found"
         });
 
-        if (product.seller.toString() !== user.id.toString() && user.role !== 'admin') {
+        if (!hasProductAccess(user, product, 'update')) {
             return res.status(403).json({
                 success: false,
                 message: "Access denied: You can only update your own products"
@@ -114,12 +172,16 @@ const updateProduct = async (req, res) => {
         }
 
         const updates = req.body;
-        const restrictedFields = ['seller', 'ratingsAverage', 'ratingsQuantity', 'sold', 'createdAt', '_id'];
+        const restrictedFields = ['seller', 'ratingsAverage', 'ratingsQuantity', 'sold', 'createdAt', '_id', '__v'];
 
         Object.keys(updates).forEach(key => {
             if (!restrictedFields.includes(key) && updates[key] !== undefined) {
                 if (key === 'technicalSpecs' || key === 'dimensions' || key === 'weight' || key === 'warranty') {
-                    product[key] = JSON.parse(updates[key]);
+                    product[key] = typeof updates[key] === 'string' ?
+                        JSON.parse(updates[key]) : updates[key];
+                } else if (key === 'isFeatured' && user.role === 'seller') {
+                    // Sellers cannot mark their own products as featured
+                    // Only admin can set isFeatured
                 } else {
                     product[key] = updates[key];
                 }
@@ -142,7 +204,9 @@ const updateProduct = async (req, res) => {
     }
 };
 
-// 3. Delete Product Image
+// ================================================
+// 3. DELETE PRODUCT IMAGE (Admin & Seller - Owner Only)
+// ================================================
 const deleteProductImage = async (req, res) => {
     try {
         const user = req.user;
@@ -154,7 +218,7 @@ const deleteProductImage = async (req, res) => {
             message: "Product not found"
         });
 
-        if (product.seller.toString() !== user.id.toString() && user.role !== 'admin') {
+        if (!hasProductAccess(user, product, 'update')) {
             return res.status(403).json({
                 success: false,
                 message: "Access denied"
@@ -186,7 +250,9 @@ const deleteProductImage = async (req, res) => {
     }
 };
 
-// 4. Soft Delete Product (FR-A5)
+// ================================================
+// 4. SOFT DELETE PRODUCT (Admin & Seller - Owner Only)
+// ================================================
 const deleteProduct = async (req, res) => {
     try {
         const user = req.user;
@@ -197,7 +263,7 @@ const deleteProduct = async (req, res) => {
             message: "Product not found"
         });
 
-        if (product.seller.toString() !== user.id.toString() && user.role !== 'admin') {
+        if (!hasProductAccess(user, product, 'delete')) {
             return res.status(403).json({
                 success: false,
                 message: "Access denied"
@@ -224,7 +290,9 @@ const deleteProduct = async (req, res) => {
     }
 };
 
-// 5. Restore Product (FR-A5)
+// ================================================
+// 5. RESTORE PRODUCT (Admin Only)
+// ================================================
 const restoreProduct = async (req, res) => {
     try {
         const user = req.user;
@@ -235,10 +303,10 @@ const restoreProduct = async (req, res) => {
             message: "Product not found"
         });
 
-        if (user.role !== 'admin') {
+        if (!isAdminOrSeller(user)) {
             return res.status(403).json({
                 success: false,
-                message: "Access denied: Admin only"
+                message: "Access denied: Admin Seller only"
             });
         }
 
@@ -263,23 +331,31 @@ const restoreProduct = async (req, res) => {
     }
 };
 
-// 6. Get Products (Advanced Filtering)
+// ================================================
+// 6. GET ALL PRODUCTS (Public with Admin/Seller filters)
+// ================================================
 const getProducts = async (req, res) => {
     try {
         const {
             category, condition, minPrice, maxPrice, brand,
-            search, lowStock, showArchived, sort, page = 1, limit = 20
+            search, lowStock, showArchived, sort,
+            page = 1, limit = 20, seller, featured
         } = req.query;
 
         let filter = {};
 
-        if (showArchived !== 'true') {
+        // Show archived products only to admin
+        if (showArchived === 'true' && isAdmin(req.user)) {
+            // Admin can see all, including archived
+        } else {
             filter.isDeleted = false;
         }
 
         if (category) filter.category = category;
         if (condition) filter.condition = condition;
         if (brand) filter.brand = brand;
+        if (seller) filter.seller = seller;
+        if (featured === 'true') filter.isFeatured = true;
 
         if (minPrice || maxPrice) {
             filter.price = {};
@@ -291,12 +367,21 @@ const getProducts = async (req, res) => {
             filter.$text = { $search: search };
         }
 
-        if (lowStock === 'true') {
+        // Low stock filter (Admin only)
+        if (lowStock === 'true' && isAdmin(req.user)) {
             filter.$expr = { $lte: ["$stockQuantity", "$lowStockThreshold"] };
         }
 
-        if (!req.user || req.user.role !== 'admin') {
+        // Visibility filter
+        if (!isAdmin(req.user) && !isSeller(req.user)) {
             filter.visibility = "Published";
+        } else if (isSeller(req.user)) {
+            // Sellers can see their own products regardless of visibility
+            // but others' products must be published
+            filter.$or = [
+                { seller: req.user.id },
+                { visibility: "Published" }
+            ];
         }
 
         let sortOption = { isFeatured: -1, createdAt: -1 };
@@ -304,6 +389,8 @@ const getProducts = async (req, res) => {
         if (sort === 'price_desc') sortOption = { price: -1 };
         if (sort === 'sold') sortOption = { sold: -1 };
         if (sort === 'rating') sortOption = { ratingsAverage: -1 };
+        if (sort === 'newest') sortOption = { createdAt: -1 };
+        if (sort === 'oldest') sortOption = { createdAt: 1 };
 
         const skip = (page - 1) * limit;
 
@@ -334,24 +421,40 @@ const getProducts = async (req, res) => {
     }
 };
 
-// 7. Get Single Product By ID
+// ================================================
+// 7. GET SINGLE PRODUCT BY ID (Public with permissions)
+// ================================================
 const getProductById = async (req, res) => {
     try {
         const product = await Product.findById(req.params.id)
             .populate('seller', 'name email profilePicture');
 
-        if (!product || (product.isDeleted && (!req.user || req.user.role !== 'admin'))) {
+        if (!product) {
             return res.status(404).json({
                 success: false,
                 message: "Product not found"
             });
         }
 
-        if (product.visibility !== "Published" && (!req.user || req.user.role !== 'admin')) {
+        // Check access permissions
+        if (product.isDeleted && !isAdmin(req.user)) {
             return res.status(404).json({
                 success: false,
                 message: "Product not found"
             });
+        }
+
+        if (product.visibility !== "Published") {
+            if (isAdmin(req.user)) {
+                // Admin can see all
+            } else if (isSeller(req.user) && product.seller._id.toString() === req.user?.id) {
+                // Seller can see their own products
+            } else {
+                return res.status(404).json({
+                    success: false,
+                    message: "Product not found"
+                });
+            }
         }
 
         const similarProducts = await Product.find({
@@ -361,7 +464,8 @@ const getProductById = async (req, res) => {
             visibility: "Published"
         })
             .limit(4)
-            .select('name price condition images ratingsAverage brand');
+            .select('name price condition images ratingsAverage brand slug')
+            .populate('seller', 'name');
 
         res.status(200).json({
             success: true,
@@ -378,10 +482,12 @@ const getProductById = async (req, res) => {
     }
 };
 
-// 8. Get Products By Category
+// ================================================
+// 8. GET PRODUCTS BY CATEGORY (Public)
+// ================================================
 const getProductByCategory = async (req, res) => {
     try {
-        const { page = 1, limit = 20, sort } = req.query;
+        const { page = 1, limit = 20, sort, condition } = req.query;
         const skip = (page - 1) * limit;
 
         let filter = {
@@ -389,13 +495,16 @@ const getProductByCategory = async (req, res) => {
             isDeleted: false
         };
 
-        if (!req.user || req.user.role !== 'admin') {
+        if (condition) filter.condition = condition;
+
+        if (!isAdmin(req.user) && !isSeller(req.user)) {
             filter.visibility = "Published";
         }
 
         let sortOption = { isFeatured: -1, createdAt: -1 };
         if (sort === 'price_asc') sortOption = { price: 1 };
         if (sort === 'price_desc') sortOption = { price: -1 };
+        if (sort === 'popular') sortOption = { sold: -1 };
 
         const [products, total] = await Promise.all([
             Product.find(filter)
@@ -408,6 +517,7 @@ const getProductByCategory = async (req, res) => {
 
         res.status(200).json({
             success: true,
+            category: req.params.category,
             count: products.length,
             total,
             page: Number(page),
@@ -423,7 +533,9 @@ const getProductByCategory = async (req, res) => {
     }
 };
 
-// 9. Get Products By Seller
+// ================================================
+// 9. GET PRODUCTS BY SELLER (Public/Self)
+// ================================================
 const getProductsBySeller = async (req, res) => {
     try {
         const sellerId = req.params.sellerId || (req.user ? req.user.id : null);
@@ -435,16 +547,22 @@ const getProductsBySeller = async (req, res) => {
             });
         }
 
-        const { page = 1, limit = 20 } = req.query;
+        const { page = 1, limit = 20, includeArchived } = req.query;
         const skip = (page - 1) * limit;
 
         let filter = {
-            seller: sellerId,
-            isDeleted: false
+            seller: sellerId
         };
 
-        if (sellerId !== req.user?.id && (!req.user || req.user.role !== 'admin')) {
+        // Check if user is viewing their own products
+        const isOwnProducts = req.user && sellerId === req.user.id;
+        const isAdminUser = isAdmin(req.user);
+
+        if (!isOwnProducts && !isAdminUser) {
+            filter.isDeleted = false;
             filter.visibility = "Published";
+        } else if (includeArchived !== 'true') {
+            filter.isDeleted = false;
         }
 
         const [products, total] = await Promise.all([
@@ -458,6 +576,8 @@ const getProductsBySeller = async (req, res) => {
 
         res.status(200).json({
             success: true,
+            sellerId,
+            isOwnProducts,
             count: products.length,
             total,
             page: Number(page),
@@ -473,27 +593,41 @@ const getProductsBySeller = async (req, res) => {
     }
 };
 
-// 10. Get Low Stock Products (FR-A8)
+// ================================================
+// 10. GET LOW STOCK PRODUCTS (Admin Only)
+// ================================================
 const getLowStockProducts = async (req, res) => {
     try {
-        const user = req.user;
-
-        if (!user || user.role !== 'admin') {
+        if (!isAdmin(req.user)) {
             return res.status(403).json({
                 success: false,
                 message: "Access denied: Admin only"
             });
         }
 
-        const products = await Product.find({
+        const { sellerId } = req.query;
+        let filter = {
             $expr: { $lte: ["$stockQuantity", "$lowStockThreshold"] },
             isDeleted: false
-        })
+        };
+
+        if (sellerId) {
+            filter.seller = sellerId;
+        }
+
+        const products = await Product.find(filter)
             .populate('seller', 'name email phone')
             .sort({ stockQuantity: 1 });
 
+        const summary = {
+            totalLowStock: products.length,
+            critical: products.filter(p => p.stockQuantity <= 2).length,
+            warning: products.filter(p => p.stockQuantity <= 5 && p.stockQuantity > 2).length
+        };
+
         res.status(200).json({
             success: true,
+            summary,
             count: products.length,
             products
         });
@@ -506,13 +640,15 @@ const getLowStockProducts = async (req, res) => {
     }
 };
 
-// 11. Update Stock Quantity
+// ================================================
+// 11. UPDATE STOCK QUANTITY (Admin & Seller - Owner Only)
+// ================================================
 const updateStock = async (req, res) => {
     try {
         const user = req.user;
-        const { quantity } = req.body;
+        const { quantity, action } = req.body; // action: 'set', 'add', 'subtract'
 
-        if (!user || (user.role !== 'admin' && user.role !== 'seller')) {
+        if (!isAdminOrSeller(user)) {
             return res.status(403).json({
                 success: false,
                 message: "Access denied"
@@ -525,27 +661,43 @@ const updateStock = async (req, res) => {
             message: "Product not found"
         });
 
-        if (product.seller.toString() !== user.id.toString() && user.role !== 'admin') {
+        if (!hasProductAccess(user, product, 'update')) {
             return res.status(403).json({
                 success: false,
                 message: "Access denied: You can only update your own products"
             });
         }
 
-        if (quantity < 0) {
+        let newQuantity = product.stockQuantity;
+
+        switch (action) {
+            case 'add':
+                newQuantity += Number(quantity);
+                break;
+            case 'subtract':
+                newQuantity -= Number(quantity);
+                break;
+            case 'set':
+            default:
+                newQuantity = Number(quantity);
+        }
+
+        if (newQuantity < 0) {
             return res.status(400).json({
                 success: false,
                 message: "Stock quantity cannot be negative"
             });
         }
 
-        product.stockQuantity = quantity;
+        product.stockQuantity = newQuantity;
         await product.save();
 
         res.status(200).json({
             success: true,
-            message: "Stock updated successfully",
-            product
+            message: `Stock ${action === 'set' ? 'updated' : action}ed successfully`,
+            previousStock: product.stockQuantity - (action === 'add' ? -quantity : action === 'subtract' ? quantity : 0),
+            newStock: product.stockQuantity,
+            action: action || 'set'
         });
 
     } catch (error) {
@@ -557,6 +709,199 @@ const updateStock = async (req, res) => {
     }
 };
 
+// ================================================
+// 12. TOGGLE PRODUCT FEATURED STATUS (Admin Only)
+// ================================================
+const toggleFeatured = async (req, res) => {
+    try {
+        if (!isAdmin(req.user)) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied: Admin only"
+            });
+        }
+
+        const product = await Product.findById(req.params.id);
+        if (!product) return res.status(404).json({
+            success: false,
+            message: "Product not found"
+        });
+
+        product.isFeatured = !product.isFeatured;
+        await product.save();
+
+        res.status(200).json({
+            success: true,
+            message: `Product ${product.isFeatured ? 'marked as' : 'removed from'} featured`,
+            isFeatured: product.isFeatured
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Server Error",
+            error: error.message
+        });
+    }
+};
+
+// ================================================
+// 13. UPDATE PRODUCT VISIBILITY (Admin & Seller - Owner Only)
+// ================================================
+const updateVisibility = async (req, res) => {
+    try {
+        const user = req.user;
+        const { visibility } = req.body;
+
+        if (!isAdminOrSeller(user)) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied"
+            });
+        }
+
+        const product = await Product.findById(req.params.id);
+        if (!product) return res.status(404).json({
+            success: false,
+            message: "Product not found"
+        });
+
+        if (!hasProductAccess(user, product, 'update')) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied: You can only update your own products"
+            });
+        }
+
+        const validVisibilities = ["Published", "Draft", "Hidden"];
+        if (!validVisibilities.includes(visibility)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid visibility value"
+            });
+        }
+
+        product.visibility = visibility;
+        await product.save();
+
+        res.status(200).json({
+            success: true,
+            message: `Product visibility updated to ${visibility}`,
+            visibility: product.visibility
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Server Error",
+            error: error.message
+        });
+    }
+};
+
+// ================================================
+// 14. GET SELLER DASHBOARD STATS (Seller Only)
+// ================================================
+const getSellerStats = async (req, res) => {
+    try {
+        if (!isSeller(req.user)) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied: Seller only"
+            });
+        }
+
+        const stats = await Product.aggregate([
+            {
+                $match: {
+                    seller: req.user.id,
+                    isDeleted: false
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalProducts: { $sum: 1 },
+                    totalStock: { $sum: "$stockQuantity" },
+                    totalSold: { $sum: "$sold" },
+                    totalRevenue: { $sum: { $multiply: ["$sold", "$price"] } },
+                    averageRating: { $avg: "$ratingsAverage" },
+                    lowStockCount: {
+                        $sum: {
+                            $cond: [
+                                { $lte: ["$stockQuantity", "$lowStockThreshold"] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    publishedCount: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$visibility", "Published"] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    draftCount: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$visibility", "Draft"] },
+                                1,
+                                0
+                            ]
+                        }
+                    }
+                }
+            }
+        ]);
+
+        const categoryStats = await Product.aggregate([
+            {
+                $match: {
+                    seller: req.user.id,
+                    isDeleted: false
+                }
+            },
+            {
+                $group: {
+                    _id: "$category",
+                    count: { $sum: 1 },
+                    totalSold: { $sum: "$sold" },
+                    totalRevenue: { $sum: { $multiply: ["$sold", "$price"] } }
+                }
+            },
+            { $sort: { totalSold: -1 } }
+        ]);
+
+        res.status(200).json({
+            success: true,
+            stats: stats[0] || {
+                totalProducts: 0,
+                totalStock: 0,
+                totalSold: 0,
+                totalRevenue: 0,
+                averageRating: 0,
+                lowStockCount: 0,
+                publishedCount: 0,
+                draftCount: 0
+            },
+            categoryStats
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Server Error",
+            error: error.message
+        });
+    }
+};
+
+// ================================================
+// EXPORT ALL CONTROLLERS
+// ================================================
 module.exports = {
     createProduct,
     updateProduct,
@@ -568,5 +913,8 @@ module.exports = {
     getProductByCategory,
     getProductsBySeller,
     getLowStockProducts,
-    updateStock
+    updateStock,
+    toggleFeatured,
+    updateVisibility,
+    getSellerStats
 };
