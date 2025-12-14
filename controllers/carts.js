@@ -3,42 +3,54 @@ const Product = require('../models/products');
 const Governate = require('../models/governates');
 const User = require('../models/users');
 const Promotion = require('../models/promos'); 
+const Order = require('../models/orders'); // 🚀 مودل الطلبات
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY); // 🚀 تهيئة Stripe
+const { createFinalOrder, finalizeOrder } = require('../utilities/orderCreation'); // 🚀 يجب إنشاء هذا الملف
+const { sendOrderConfirmationEmail } = require('../utilities/email'); // 🚀 دالة الإيميل
 
-// Helper function to calculate cart totals
-const calculateCartTotals = (cart, governate, deliveryMethod = 'standard') => {
+// 🚀 Helper function to calculate cart totals (مُعدَّلة لتقبل الخصومات والشحن المجاني)
+const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', discountAmount = 0, freeShipping = false) => {
     let subtotal = 0;
 
-    // Calculate subtotal
+    // 1. حساب الإجمالي الفرعي قبل الخصم
     cart.items.forEach(item => {
         if (item.product && item.product.price) {
             subtotal += item.product.price * item.quantity;
         }
     });
 
-    // Get delivery fee based on governate
+    // 2. حساب رسوم الشحن
     let deliveryFee = governate?.fee || 0;
-
-    // Apply express delivery fee (50% extra)
     if (deliveryMethod === 'express') {
         deliveryFee = Math.round(deliveryFee * 1.5);
     }
+    
+    // 3. تطبيق الشحن المجاني
+    if (freeShipping) {
+        deliveryFee = 0;
+    }
+    
+    // 4. تطبيق الخصم
+    let finalSubtotal = subtotal - discountAmount;
+    if (finalSubtotal < 0) finalSubtotal = 0;
 
-    // Calculate VAT (14% for Egypt)
+    // 5. حساب VAT (بعد الخصم)
     const vatRate = 0.14;
-    const vat = subtotal * vatRate;
+    const vat = finalSubtotal * vatRate;
 
-    // Calculate total
-    const total = subtotal + deliveryFee + vat;
+    // 6. الإجمالي النهائي
+    const total = finalSubtotal + deliveryFee + vat;
 
     return {
-        subtotal,
+        subtotal: subtotal,
+        finalSubtotal: finalSubtotal,
         deliveryFee,
         vat,
         total,
-        vatRate: vatRate * 100 // Return as percentage for display
+        discount: discountAmount,
+        vatRate: vatRate * 100 
     };
 };
-
 // Helper to calculate estimated delivery date
 const calculateDeliveryDate = (governate, deliveryMethod = 'standard') => {
     const today = new Date();
@@ -790,7 +802,93 @@ const clearCart = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+const initiatePayment = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ message: "Authentication required to initiate checkout" });
+        }
 
+        const { paymentMethod, shippingAddressId, deliveryMethod = 'standard' } = req.body;
+
+        if (!['COD', 'Online'].includes(paymentMethod)) { 
+            return res.status(400).json({ message: "Invalid payment method. Only 'COD' or 'Online' are supported." });
+        }
+
+        const cart = await Cart.findOne({ user: userId }).populate("items.product");
+        if (!cart || cart.items.length === 0) {
+            return res.status(400).json({ message: "Cart is empty." });
+        }
+
+        // 1. جلب العنوان والمستخدم
+        const userDoc = await User.findById(userId);
+        const shippingAddress = userDoc.addresses.id(shippingAddressId);
+        if (!shippingAddress) return res.status(400).json({ message: "Valid shipping address ID required." });
+
+        // 2. حساب الإجماليات النهائية
+        const governate = await Governate.findOne({ name: shippingAddress.governorate });
+        
+        // 🛑 تمرير جميع معلمات الخصم والشحن
+        const totals = calculateCartTotals(
+            cart, governate, deliveryMethod, 
+            cart.discountAmount || 0, cart.freeShipping || false
+        );
+
+        // 3. التحقق من المخزون النهائي (يتم هذا التحقق أيضاً في createFinalOrder)
+        for (const item of cart.items) {
+            const product = await Product.findById(item.product._id);
+            if (!product || product.stockQuantity < item.quantity) {
+                 return res.status(400).json({ message: `Insufficient stock for ${item.product.name}` });
+            }
+        }
+
+        // ==========================================================
+        // 4. منطق الدفع (COD/Stripe)
+        // ==========================================================
+        
+        if (paymentMethod === 'COD') {
+            // 4.1. Cash on Delivery
+            
+            // إنشاء الطلب مباشرة (FR-C18 & FR-C20)
+            const newOrder = await createFinalOrder(userId, userDoc, shippingAddress, totals, 'COD', 'Pending', cart);
+            
+            // FR-C19: إرسال التأكيد وتخفيض المخزون وتفريغ السلة
+            await sendOrderConfirmationEmail(userDoc.email, userDoc.name, newOrder.orderNumber, newOrder.totalAmount);
+            await finalizeOrder(cart); 
+            
+            return res.status(201).json({
+                message: "Order placed successfully (Cash on Delivery). Payment is Pending.",
+                order: newOrder
+            });
+            
+        } else if (paymentMethod === 'Online') {
+            // 4.2. Stripe/Online Payment Gateway
+            
+            const lineItems = cart.items.map(item => ({
+                // ... (إعداد Line Items للمنتجات)
+            }));
+            
+            // إضافة الشحن
+            if (totals.deliveryFee > 0) {
+                 lineItems.push({ 
+                    price_data: { currency: 'egp', product_data: { name: 'Shipping Fee' }, unit_amount: Math.round(totals.deliveryFee * 100) }, 
+                    quantity: 1 
+                });
+            }
+
+            const session = await stripe.checkout.sessions.create({
+                // ... (إعداد جلسة Stripe)
+                line_items: lineItems,
+                metadata: { userId: userId.toString(), shippingAddressId: shippingAddressId.toString() },
+            });
+            
+            return res.json({ id: session.id, url: session.url, message: "Redirecting to payment gateway" });
+        }
+    } catch (err) {
+        console.error("Checkout error:", err);
+        return res.status(500).json({ message: "Server error during checkout process", error: err.message });
+    }
+};
 module.exports = {
     getCart,
     getCartSummary,
@@ -804,5 +902,6 @@ module.exports = {
     addToCart,
     updateCartItem,
     removeCartItem,
-    clearCart
+    clearCart,
+    initiatePayment
 };
