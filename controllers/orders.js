@@ -1,6 +1,7 @@
 const Order = require('../models/orders');
-const Promo = require('../models/promos');
+const Promotion = require('../models/promos');
 const Product = require('../models/products');
+const Cart = require('../models/carts');
 // تأكدي من مسار ملف الإيميل
 const { sendOrderStatusEmail } = require('../utilities/email');
 
@@ -10,50 +11,120 @@ const createOrder = async (req, res) => {
         const user = req.user;
         if (!user) return res.status(401).json({ message: "Authentication required" });
 
-        const { items: rawItems, shippingAddress, paymentMethod, promo } = req.body;
+        const { shippingAddress, paymentMethod, promo } = req.body;
 
-        if (!rawItems || !rawItems.length) return res.status(400).json({ message: "No items provided" });
         if (!paymentMethod) return res.status(400).json({ message: "Payment method required" });
+
+        // Get user's cart
+        const cart = await Cart.findOne({ user: user._id || user.id });
+
+        if (!cart || !cart.items || cart.items.length === 0) {
+            return res.status(400).json({
+                message: "Your cart is empty. Add items to cart first"
+            });
+        }
+
+        // Validate shipping address
+        if (!shippingAddress) return res.status(400).json({ message: "Shipping address required" });
+
+        const requiredAddressFields = ['phone', 'address', 'city', 'country'];
+        for (const field of requiredAddressFields) {
+            if (!shippingAddress[field]) {
+                return res.status(400).json({
+                    message: `Shipping address ${field} is required`
+                });
+            }
+        }
 
         let subtotal = 0;
         const orderItems = [];
 
-        // 1. معالجة المنتجات والمخزون
-        for (const rawItem of rawItems) {
-            const product = await Product.findById(rawItem.product);
-            if (!product) return res.status(404).json({ message: `Product ${rawItem.product} not found` });
-            if (product.stockQuantity < rawItem.quantity) return res.status(400).json({ message: `Not enough stock for ${product.name}` });
+        // Process items from cart
+        for (const cartItem of cart.items) {
+            const product = await Product.findById(cartItem.product);
+            if (!product) {
+                return res.status(404).json({
+                    message: `Product ${cartItem.product} not found or has been removed`
+                });
+            }
+
+            if (product.stockQuantity < cartItem.quantity) {
+                return res.status(400).json({
+                    message: `Not enough stock for ${product.name}. Available: ${product.stockQuantity}, Requested: ${cartItem.quantity}`
+                });
+            }
+
+            if (product.visibility !== "Published" || product.isDeleted) {
+                return res.status(400).json({
+                    message: `Product ${product.name} is not available for purchase`
+                });
+            }
 
             const itemPrice = product.price;
-            subtotal += itemPrice * rawItem.quantity;
+            subtotal += itemPrice * cartItem.quantity;
 
             orderItems.push({
-                product: rawItem.product,
+                product: cartItem.product,
                 name: product.name,
-                quantity: rawItem.quantity,
+                quantity: cartItem.quantity,
                 price: itemPrice,
-                condition: rawItem.condition || 'New'
+                condition: product.condition || 'New'
             });
 
-            // خصم المخزون
-            product.stockQuantity -= rawItem.quantity;
+            // Deduct stock and update sold count
+            product.stockQuantity -= cartItem.quantity;
+            product.sold += cartItem.quantity;
             await product.save();
         }
 
-        // 2. منطق الخصم (Promo)
+        // Promo logic
         let discount = 0;
+        let promoApplied = null;
+
         if (promo) {
-            const promoDoc = await Promo.findOne({ code: promo, active: true });
+            const promoDoc = await Promotion.findOne({
+                code: promo.toUpperCase(),
+                active: true
+            });
+
             if (promoDoc) {
                 const now = new Date();
                 if (promoDoc.startDate <= now && promoDoc.endDate >= now) {
                     if (!promoDoc.minPurchase || subtotal >= promoDoc.minPurchase) {
+
+                        // Check usage limits
+                        if (promoDoc.totalUsageLimit && promoDoc.usedCount >= promoDoc.totalUsageLimit) {
+                            return res.status(400).json({
+                                message: "Promo code usage limit reached"
+                            });
+                        }
+
+                        // Check user usage limit
+                        const userUsage = promoDoc.usedBy.find(u => u.user.toString() === user.id);
+                        if (promoDoc.usageLimitPerUser && userUsage && userUsage.count >= promoDoc.usageLimitPerUser) {
+                            return res.status(400).json({
+                                message: "You have reached your usage limit for this promo"
+                            });
+                        }
+
+                        // Apply discount based on type
                         if (promoDoc.type === "Percentage") {
                             discount = (subtotal * promoDoc.value) / 100;
-                            if (promoDoc.maxDiscount) discount = Math.min(discount, promoDoc.maxDiscount);
                         } else if (promoDoc.type === "Fixed") {
-                            discount = promoDoc.value;
+                            discount = Math.min(promoDoc.value, subtotal);
+                        } else if (promoDoc.type === "FreeShipping") {
+                            discount = 10; // delivery fee
                         }
+
+                        // Record usage
+                        if (!userUsage) {
+                            promoDoc.usedBy.push({ user: user.id, count: 1 });
+                        } else {
+                            userUsage.count += 1;
+                        }
+                        promoDoc.usedCount += 1;
+                        await promoDoc.save();
+                        promoApplied = promoDoc.code;
                     }
                 }
             }
@@ -64,44 +135,82 @@ const createOrder = async (req, res) => {
         const totalAmount = subtotal + VAT + deliveryFee - discount;
         const paymentStatus = paymentMethod === 'Online' ? 'Paid' : 'Pending';
 
-        // ==========================================================
-        // 👇👇 الهاندلة اليدوية هنا بدلاً من المودل (New Logic) 👇👇
-        // ==========================================================
+        // Generate unique order number
+        let generatedOrderNumber;
+        let isUnique = false;
 
-        // أ) توليد رقم طلب عشوائي (Unique)
-        const prefix = "ORD";
-        const random = Math.floor(1000 + Math.random() * 9000);
-        const timestamp = Date.now().toString().slice(-6); // آخر 6 أرقام من الوقت
-        const generatedOrderNumber = `${prefix}-${timestamp}-${random}`;
+        while (!isUnique) {
+            const prefix = "ORD";
+            const random = Math.floor(1000 + Math.random() * 9000);
+            const timestamp = Date.now().toString().slice(-6);
+            generatedOrderNumber = `${prefix}-${timestamp}-${random}`;
 
-        // ب) حساب تاريخ التوصيل المتوقع (بعد 5 أيام)
+            const existingOrder = await Order.findOne({ orderNumber: generatedOrderNumber });
+            if (!existingOrder) isUnique = true;
+        }
+
+        // Calculate estimated delivery date (5 business days)
         const estimatedDate = new Date();
-        estimatedDate.setDate(estimatedDate.getDate() + 5);
-        // ==========================================================
+        let daysAdded = 0;
+        while (daysAdded < 5) {
+            estimatedDate.setDate(estimatedDate.getDate() + 1);
+            // Skip weekends (0 = Sunday, 6 = Saturday)
+            if (estimatedDate.getDay() !== 0 && estimatedDate.getDay() !== 6) {
+                daysAdded++;
+            }
+        }
 
         const newOrder = new Order({
             user: user._id || user.id,
-            orderNumber: generatedOrderNumber, // 👈 بنبعته هنا
-            estimatedDeliveryDate: estimatedDate, // 👈 وبنبعت التاريخ هنا
+            orderNumber: generatedOrderNumber,
+            estimatedDeliveryDate: estimatedDate,
             items: orderItems,
-            shippingAddress,
-            paymentMethod,
-            paymentStatus,
-            totalAmount,
-            VAT,
-            deliveryFee,
-            discount,
+            shippingAddress: {
+                address: shippingAddress.address,
+                city: shippingAddress.city,
+                postalCode: shippingAddress.postalCode || "00000",
+                country: shippingAddress.country,
+                phone: shippingAddress.phone
+            },
+            paymentMethod: paymentMethod,
+            paymentStatus: paymentStatus,
+            totalAmount: totalAmount,
+            VAT: VAT,
+            deliveryFee: deliveryFee,
+            discount: discount,
             status: "Order Placed"
         });
 
         await newOrder.save();
-        res.status(201).json({ message: "Order placed successfully", order: newOrder });
+
+        // Clear the cart after successful order
+        cart.items = [];
+        await cart.save();
+
+        res.status(201).json({
+            success: true,
+            message: "Order placed successfully",
+            order: {
+                orderNumber: newOrder.orderNumber,
+                totalAmount: newOrder.totalAmount,
+                estimatedDeliveryDate: newOrder.estimatedDeliveryDate,
+                paymentStatus: newOrder.paymentStatus,
+                status: newOrder.status,
+                discountApplied: discount > 0 ? discount : 0,
+                promoCode: promoApplied,
+                cartCleared: true
+            }
+        });
 
     } catch (err) {
-        res.status(500).json({ message: "Server error", error: err.message });
+        console.error("Order creation error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: err.message
+        });
     }
 };
-
 // 2. Get Orders (FR-O1, FR-O6)
 // 2. Get Orders (FR-O1: عرض الطلبات)
 // 2. Get Orders (Updated for FR-A14)

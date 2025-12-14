@@ -716,24 +716,31 @@ const addToCart = async (req, res) => {
 
 const updateCartItem = async (req, res) => {
     try {
-        const { product_id, quantity } = req.body;
-        if (!product_id || quantity === undefined) return res.status(400).json({ message: 'Product ID and quantity required' });
-
-        const product = await Product.findById(product_id);
-        if (!product) return res.status(404).json({ message: 'Product not found' });
-        if (quantity > product.stockQuantity) return res.status(400).json({ message: 'Not enough stock' });
+        const { quantity } = req.body;
+        const { item_id } = req.params;
+        if ( quantity === undefined) return res.status(400).json({ message: 'Item ID and quantity required' });
 
         const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         const cart = await Cart.findOne(query);
         if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
-        const index = cart.items.findIndex(i => i.product.toString() === product_id);
-        if (index === -1) return res.status(404).json({ message: 'Product not in cart' });
+        const cartItem = cart.items.id(item_id);
+        if (!cartItem) return res.status(404).json({ message: 'Cart item not found' });
+
+        const product = await Product.findById(cartItem.product);
+        if (!product) {
+            // Remove item if product no longer exists
+            cartItem.remove();
+            await cart.save();
+            return res.status(404).json({ message: 'Product no longer available, removed from cart' });
+        }
+
+        if (quantity > product.stockQuantity) return res.status(400).json({ message: 'Not enough stock' });
 
         if (quantity <= 0) {
-            cart.items.splice(index, 1);
+            cartItem.remove();
         } else {
-            cart.items[index].quantity = quantity;
+            cartItem.quantity = quantity;
         }
 
         await cart.save();

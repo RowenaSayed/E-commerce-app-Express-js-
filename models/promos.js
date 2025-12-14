@@ -38,6 +38,14 @@ const PromotionSchema = new Schema({
         type: Number,
         default: null
     },
+    usedCount: { type: Number, default: 0 },
+
+    usedBy: [
+        {
+            user: { type: Schema.Types.ObjectId, ref: "User" },
+            count: { type: Number, default: 1 }
+        }
+    ],
     active: {
         type: Boolean,
         default: true
