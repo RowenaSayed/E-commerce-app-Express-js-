@@ -11,7 +11,7 @@ const { sendOrderConfirmationEmail } = require('../utilities/email'); // 🚀 د
 // 🚀 Helper function to calculate cart totals (مُعدَّلة لتقبل الخصومات والشحن المجاني)
 const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', discountAmount = 0, freeShipping = false) => {
     let subtotal = 0;
-
+    let itemsTotal = 0;
     // 1. حساب الإجمالي الفرعي قبل الخصم
     cart.items.forEach(item => {
         if (item.product && item.product.price) {
@@ -31,12 +31,19 @@ const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', disco
     }
     
     // 4. تطبيق الخصم
+    let finalDiscount = Math.min(discountAmount, subtotal);
     let finalSubtotal = subtotal - discountAmount;
     if (finalSubtotal < 0) finalSubtotal = 0;
 
     // 5. حساب VAT (بعد الخصم)
     const vatRate = 0.14;
     const vat = finalSubtotal * vatRate;
+ 
+    
+    // 5. تطبيق الشحن المجاني
+    if (freeShipping) {
+        deliveryFee = 0;
+    }
 
     // 6. الإجمالي النهائي
     const total = finalSubtotal + deliveryFee + vat;
@@ -48,7 +55,7 @@ const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', disco
         vat,
         total,
         discount: discountAmount,
-        vatRate: vatRate * 100 
+        vatRate: vatRate 
     };
 };
 // Helper to calculate estimated delivery date
@@ -169,18 +176,51 @@ const getCart = async (req, res) => {
         const cart = await Cart.findOne(query).populate("items.product");
 
         if (!cart) return res.json({ items: [] });
+        
+        let itemsWereRemoved = false;
+        let quantitiesWereAdjusted = false;
+        
+        // 🚀 البدء في منطق التنظيف الذكي للسلة
+        const updatedItems = cart.items.filter(item => {
+            const product = item.product;
 
-        // Filter out out-of-stock items
-        cart.items = cart.items.filter(item => item.product?.stockQuantity > 0);
+            // 1. التحقق من وجود المنتج وكمية المخزون
+            if (!product || product.stockQuantity <= 0) {
+                itemsWereRemoved = true;
+                return false; // إزالة العنصر بالكامل (نفد المخزون)
+            }
 
-        // Calculate totals
+            // 2. التحقق من تجاوز الكمية المطلوبة للمخزون
+            if (item.quantity > product.stockQuantity) {
+                item.quantity = product.stockQuantity; // ضبط الكمية لتساوي المخزون المتوفر
+                quantitiesWereAdjusted = true;
+            }
+
+            return true; // إبقاء العنصر
+        });
+
+        // 3. تحديث وحفظ السلة إذا حدثت أي تعديلات
+        if (itemsWereRemoved || quantitiesWereAdjusted) {
+             cart.items = updatedItems;
+             
+             // إعادة تعيين أي خصم مطبق، حيث أن محتوى السلة قد تغير الآن
+             cart.discountCode = undefined;
+             cart.discountAmount = undefined;
+             cart.freeShipping = undefined;
+             
+             await cart.save();
+        } else {
+             await cart.save(); // حفظ عادي لأي تحديثات أخرى
+        }
+
+        // 4. حساب الإجماليات
         let totals = {
             subtotal: 0,
             deliveryFee: 0,
             vat: 0,
             total: 0,
-            discount: 0,
-            discountCode: null,
+            discount: cart.discountAmount || 0, // استخدام الخصم المُعاد تعيينه (عادة 0)
+            discountCode: cart.discountCode || null,
             vatRate: 14
         };
 
@@ -192,23 +232,32 @@ const getCart = async (req, res) => {
                 }
             });
 
-            // Apply discount if exists
-            if (cart.discountCode && cart.discountAmount) {
-                totals.discount = cart.discountAmount;
-                totals.discountCode = cart.discountCode;
-                totals.subtotal -= cart.discountAmount;
-                if (totals.subtotal < 0) totals.subtotal = 0;
-            }
+            // Apply discount if exists (هذا المنطق سيعمل الآن بقيمة الخصم الجديدة بعد التنظيف)
+            let finalSubtotal = totals.subtotal - totals.discount;
+            if (finalSubtotal < 0) finalSubtotal = 0;
 
             // Calculate VAT (14%)
-            totals.vat = totals.subtotal * 0.14;
-            totals.total = totals.subtotal + totals.vat;
+            totals.vat = finalSubtotal * 0.14;
+            totals.total = finalSubtotal + totals.vat;
+        }
+        
+        // 5. إرجاع رسالة تنبيه للمستخدم
+        let message = "Cart retrieved successfully.";
+        if (itemsWereRemoved) {
+             message = "Some items were automatically removed due to insufficient stock.";
+        } else if (quantitiesWereAdjusted) {
+             message = "Quantity of some items was reduced to match available stock.";
         }
 
-        await cart.save();
-        res.json({ cart, totals });
+
+        res.json({ 
+            cart, 
+            totals,
+            message 
+        });
 
     } catch (err) {
+        console.error("getCart Error:", err);
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -864,9 +913,38 @@ const initiatePayment = async (req, res) => {
         } else if (paymentMethod === 'Online') {
             // 4.2. Stripe/Online Payment Gateway
             
-            const lineItems = cart.items.map(item => ({
+            const lineItems = cart.items.map(item => {
+                // سعر الوحدة قبل الخصم والضريبة
+                const unitPrice = item.product.price;
+                
+                // ⚠️ يجب أن يتم تطبيق الخصم والـ VAT على كل صنف هنا بشكل أكثر تعقيداً
+                // ولكن للتبسيط وتجنب تعقيدات (منطق الخصم الموزع)، سنعتمد على الإجمالي النهائي
+                
+                // نسبة مساهمة المنتج في الإجمالي الفرعي (قبل الخصم)
+                const productRatio = (unitPrice * item.quantity) / totals.subtotal;
+                
+                // حصة المنتج من finalSubtotal (بعد الخصم)
+                const discountedProductPrice = (totals.finalSubtotal * productRatio) / item.quantity;
+
+                // حصة المنتج من VAT
+                const productVAT = (totals.vat * productRatio) / item.quantity;
+                
+                // السعر النهائي للوحدة شامل الضريبة (بعد الخصم)
+                const finalUnitPrice = discountedProductPrice + productVAT;
+
+                return {
+                    price_data: {
+                        currency: 'egp',
+                        product_data: { name: item.product.name },
+                        // يجب أن يكون المبلغ بالوحدات الصغرى (قروش)، لذا نضرب في 100
+                        unit_amount: Math.round(finalUnitPrice * 100), 
+                    },
+                    quantity: item.quantity,
+                };
+            });
+        
                 // ... (إعداد Line Items للمنتجات)
-            }));
+            
             
             // إضافة الشحن
             if (totals.deliveryFee > 0) {
@@ -878,8 +956,17 @@ const initiatePayment = async (req, res) => {
 
             const session = await stripe.checkout.sessions.create({
                 // ... (إعداد جلسة Stripe)
-                line_items: lineItems,
-                metadata: { userId: userId.toString(), shippingAddressId: shippingAddressId.toString() },
+                payment_method_types: ['card'],
+                line_items: lineItems, // الآن lineItems تم تهيئتها بشكل صحيح
+                mode: 'payment',
+                success_url: `${req.protocol}://${req.get('host')}/api/orders/success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${req.protocol}://${req.get('host')}/cart/checkout`,
+                customer_email: userDoc.email,
+                metadata: { 
+                    userId: userId.toString(), 
+                    shippingAddressId: shippingAddressId.toString(),
+                    deliveryMethod: deliveryMethod,
+                    discountCode: cart.discountCode || ''},
             });
             
             return res.json({ id: session.id, url: session.url, message: "Redirecting to payment gateway" });
@@ -887,6 +974,57 @@ const initiatePayment = async (req, res) => {
     } catch (err) {
         console.error("Checkout error:", err);
         return res.status(500).json({ message: "Server error during checkout process", error: err.message });
+    }
+};
+const handleStripeSuccess = async (req, res) => {
+    const sessionId = req.query.session_id;
+
+    try {
+        // 1. جلب تفاصيل الجلسة من Stripe
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        // 2. التحقق من حالة الدفع
+        if (session.payment_status !== 'paid') {
+            // يمكن إعادة توجيه المستخدم إلى صفحة 'الدفع فشل'
+            return res.redirect(`${process.env.CLIENT_URL}/payment-failed`); 
+        }
+
+        // 3. منع التنفيذ المزدوج
+        // (يجب أن تتحقق مما إذا كان الطلب قد تم إنشاؤه بالفعل باستخدام sessionId أو OrderId مخزن في metadata)
+
+        // 4. استخلاص البيانات من metadata
+        const { userId, shippingAddressId, deliveryMethod } = session.metadata;
+
+        // 5. جلب السلة والعنوان والمستخدم (لإعادة بناء بيانات الطلب)
+        const userDoc = await User.findById(userId);
+        const shippingAddress = userDoc.addresses.id(shippingAddressId);
+        const cart = await Cart.findOne({ user: userId }).populate("items.product");
+
+        // 6. حساب الإجماليات مرة أخرى (للتأكد)
+        const governate = await Governate.findOne({ name: shippingAddress.governorate });
+        const totals = calculateCartTotals(cart, governate, deliveryMethod, cart.discountAmount || 0, cart.freeShipping || false);
+        
+        // 7. إنشاء الطلب النهائي
+        const newOrder = await createFinalOrder(
+            userId, 
+            userDoc, 
+            shippingAddress, 
+            totals, 
+            'Online', 
+            'Paid', // الحالة مدفوعة
+            cart
+        );
+
+        // 8. إنهاء العملية (تخفيض المخزون وتفريغ السلة)
+        await sendOrderConfirmationEmail(userDoc.email, userDoc.name, newOrder.orderNumber, newOrder.totalAmount);
+        await finalizeOrder(cart); 
+
+        // 9. إعادة توجيه العميل إلى صفحة تأكيد الطلب
+        res.redirect(`${process.env.CLIENT_URL}/order-confirmation/${newOrder._id}`); 
+
+    } catch (err) {
+        console.error("Stripe success handler error:", err);
+        res.redirect(`${process.env.CLIENT_URL}/payment-failed?error=server`);
     }
 };
 module.exports = {
@@ -903,5 +1041,6 @@ module.exports = {
     updateCartItem,
     removeCartItem,
     clearCart,
-    initiatePayment
+    initiatePayment,
+    handleStripeSuccess
 };

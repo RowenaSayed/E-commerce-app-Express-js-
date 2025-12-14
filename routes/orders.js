@@ -7,13 +7,14 @@ const {
     updateOrderStatus, 
     cancelOrder, 
     requestReturn, 
-    deleteOrder 
+    deleteOrder ,
+    adminCreateOrder
 } = require('../controllers/orders');
 const { auth, authorize } = require('../middleware/auth');
 
 // 1. Create Order
-router.post('/', auth, createOrder);
-
+router.post('/', auth,createOrder);
+router.post('/admin', auth, authorize('admin', 'support'),adminCreateOrder); // تأكد أن لديك middleware لفحص الصلاحيات);
 // 2. View Orders (History)
 router.get('/', auth, getOrders);
 
