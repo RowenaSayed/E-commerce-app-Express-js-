@@ -7,7 +7,6 @@ const createTicket = async (req, res) => {
     try {
         const user = req.user; // مستخرج من التوكن عبر middleware
 
-        // التحقق من المصادقة (لضمان وجود user id)
         if (!user || (!user._id && !user.id)) {
             return res.status(401).json({ message: "Authentication required." });
         }
