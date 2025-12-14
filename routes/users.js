@@ -25,7 +25,7 @@ router.post('/register', createUser);
 router.post('/social-login', socialLogin); 
 router.post('/verify-2fa', verify2FA);
 router.post('/forgot-password',forgotPassword);
-router.post('/reset-password/:token',resetPassword);
+router.put('/reset-password/:token',resetPassword);
 router.get('/verify/:token', verifyEmail); // ✅ تم نقل المسار الثابت هنا
 
 // --- 2. 🛡️ المسارات المحمية العامة والخاصة ---
