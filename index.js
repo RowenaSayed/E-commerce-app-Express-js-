@@ -17,6 +17,7 @@ app.use(cors({
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.json());
 app.use(sessionMiddleware);
+const Governate = require('./models/governates');
 
 // Import routes
 const userRoutes = require('./routes/users');
@@ -51,8 +52,10 @@ app.get('/test-session', (req, res) => {
 
 
 mongoose.connect(process.env.MONGO_URI)
-    .then(() => {
+    .then(async() => {
         console.log('MongoDB Connected successfully');
+        await Governate.initializeGovernates();
+        console.log('Governates initialized successfully or already exist.');
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         });

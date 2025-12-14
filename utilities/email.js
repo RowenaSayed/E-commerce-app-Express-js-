@@ -113,10 +113,49 @@ const sendWelcomeEmail = async (email, name, verificationToken) => {
         html 
     });
 };
+// 2. دالة إرسال تأكيد الطلب
+/**
+ * @param {string} email - البريد الإلكتروني للمستلم.
+ * @param {string} name - اسم المستلم.
+ * @param {string} orderNumber - رقم الطلب الفريد.
+ * @param {number} totalAmount - إجمالي قيمة الطلب.
+ */
+const sendOrderConfirmationEmail = async (email, name, orderNumber, totalAmount) => {
+    try {
+        const mailOptions = {
+            from: `Your E-commerce <${process.env.SMTP_EMAIL}>`, // اسم مرسل البريد
+            to: email,
+            subject: `🎉 تأكيد طلبك رقم: ${orderNumber}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+                    <h2>عزيزي/عزيزتي ${name},</h2>
+                    <p>نحن سعداء لتأكيد استلام طلبك! جميع تفاصيل طلبك موضحة أدناه:</p>
+                    
+                    <p style="font-size: 1.1em; font-weight: bold;">رقم الطلب: ${orderNumber}</p>
+                    <p style="font-size: 1.1em; color: #4CAF50;">المبلغ الإجمالي: ${totalAmount.toFixed(2)} EGP</p>
+                    
+                    <p>سيتم معالجة طلبك قريباً. يمكنك متابعة حالة الطلب عبر حسابك.</p>
+                    <p>شكراً لتسوقك معنا!</p>
+                    <p>فريق دعم ${process.env.APP_NAME || 'المتجر الإلكتروني'}</p>
+                </div>
+            `,
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`Order confirmation email sent to ${email}: ${info.messageId}`);
+        // إذا كنت تستخدم Ethereal، يمكنك عرض الرابط: 
+        // console.log("Preview URL: %s", nodemailer.getTestMessageUrl(info));
+
+    } catch (error) {
+        console.error(`Error sending order confirmation email to ${email}:`, error);
+        // يمكنك إرسال إشعار إلى لوحة الإدارة إذا فشل الإيميل
+    }
+};
 // تصدير كل الدوال عشان نستخدمها في الكنترولرز المختلفة
 module.exports = { 
     sendResetPasswordEmail, 
     sendTicketStatusEmail, 
     sendOrderStatusEmail,
-    sendWelcomeEmail
+    sendWelcomeEmail,
+    sendOrderConfirmationEmail
 };

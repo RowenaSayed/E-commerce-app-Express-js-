@@ -8,7 +8,8 @@ const { getCart, addToCart, updateCartItem, clearCart, removeCartItem, addNewAdd
     getSavedAddresses,
     getShippingOptions,
     removePromotionCode,
-    updateAddress
+    updateAddress,
+    initiatePayment
     
 } = require('../controllers/carts');
 const sessionMiddleware = require('../middleware/session');
@@ -27,4 +28,6 @@ router.get('/shipping-options', auth, getShippingOptions);
 router.post('/apply-promo', auth, applyPromotionCode);      
 router.delete('/remove-promo', auth, removePromotionCode);
 router.get('/summary', auth, getCartSummary);
+router.post('/checkout', auth, initiatePayment);
+//router.post('/checkout', auth, initiatePayment);
 module.exports = router;
