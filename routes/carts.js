@@ -14,7 +14,7 @@ const { getCart, addToCart, updateCartItem, clearCart, removeCartItem, addNewAdd
 const sessionMiddleware = require('../middleware/session');
 const { auth, authorize } = require('../middleware/auth');
 router.use(sessionMiddleware);
-router.get('/', auth, getCart);
+router.get('/',  getCart);
 router.post('/add', addToCart);
 router.put('/update/:item_id', auth, updateCartItem);
 router.delete('/remove/:itemId', auth, removeCartItem);
