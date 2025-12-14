@@ -11,10 +11,13 @@ const {
     verify2FA ,
     forgotPassword,
     resetPassword,
-    verifyEmail
+    verifyEmail,
+    toggleBanUser,
+    updateUser
 } = require('../controllers/users');
 
 const { auth, authorize } = require('../middleware/auth');
+const upload = require('../utilities/fileUpload');
 
 // --- 1. 🛑 المسارات الثابتة (يجب أن تأتي أولاً) 🛑
 router.post('/login', login);  
@@ -22,7 +25,7 @@ router.post('/register', createUser);
 router.post('/social-login', socialLogin); 
 router.post('/verify-2fa', verify2FA);
 router.post('/forgot-password',forgotPassword);
-router.post('/reset-password/:token',resetPassword);
+router.put('/reset-password/:token',resetPassword);
 router.get('/verify/:token', verifyEmail); // ✅ تم نقل المسار الثابت هنا
 
 // --- 2. 🛡️ المسارات المحمية العامة والخاصة ---
@@ -30,7 +33,11 @@ router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط ي�
 
 // --- 3. 🚀 المسارات الديناميكية (يجب أن تأتي أخيراً) 🚀
 router.get('/:id', auth, getUserById); // المستخدم يشوف بياناته
-router.put('/:id', auth, updateUserById);  // المستخدم يعدل بياناته
+//for Admin to update any user and for user to update his own data
+router.put('/user/:id', auth, upload.single('profilePicture'), updateUserById);  
+// المستخدم يحدث بياناته + صورة بروفايل
+router.put('/profile',upload.single('profilePicture'), auth, updateUser); // المستخدم يحدث بياناته (بدون صورة بروفايل)
+router.put('/:id/toggle-ban', auth, authorize('admin'), toggleBanUser); // الأدمن يوقف/يفعل يوزر
 router.delete('/:id', auth, authorize('admin'), deleteUserById); // الأدمن يحذف
 
 

@@ -38,7 +38,7 @@ const sendEmail = async (options) => {
 
 // 1. إيميل استعادة كلمة المرور (Forgot Password)
 const sendResetPasswordEmail = async (email, token) => {
-    const resetURL = `http://localhost:3000/reset-password/${token}`; // رابط الفرونت إند
+    const resetURL = `http://localhost:8000/api/users/reset-password/${token}`; // رابط الفرونت إند
     
     const message = `You requested a password reset. Click here: ${resetURL}`;
     const html = `

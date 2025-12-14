@@ -10,7 +10,7 @@ const ProductSchema = new Schema({
         trim: true,
         maxlength: [100, 'Name cannot exceed 100 characters']
     },
-    nameAr: { // الاسم بالعربي
+    nameAr: {
         type: String, 
         trim: true,
         maxlength: [100, 'Arabic Name cannot exceed 100 characters']
@@ -18,21 +18,18 @@ const ProductSchema = new Schema({
     
     slug: { type: String, lowercase: true },
 
-    // FR-A3: Description (Arabic & English)
     description: {
         type: String,
         required: [true, 'Please provide description'],
         maxlength: [2000, 'Description cannot exceed 2000 characters']
     },
-    descriptionAr: { // الوصف بالعربي
+    descriptionAr: { 
         type: String,
         maxlength: [2000, 'Arabic Description cannot exceed 2000 characters']
     },
     
-    // FR-A3: Category & Subcategory
     category: {
         type: String,
-        // ملاحظة: يفضل مستقبلاً جعلها ref لمودل Category مستقل لتحقيق FR-A11
         enum: ['Laptops', 'Desktops', 'Accessories', 'Components', 'Peripherals', 'Other'],
         required: true
     },
@@ -49,7 +46,6 @@ const ProductSchema = new Schema({
         required: true 
     },
 
-    // تفاصيل الحالات الخاصة
     usedDetails: {
         deviceConditionDescription: String,
         previousUsageDuration: String,

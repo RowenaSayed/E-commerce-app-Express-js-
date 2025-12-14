@@ -153,16 +153,58 @@ const getUserById = async (req, res) => {
 };
 
 // 4. Update User
+const updateUser = async (req, res) => {
+    try {
+        const { password, role, ...updateData } = req.body;
+        const userId = req.user.id; 
+
+        if (req.file) {
+            updateData.profilePicture = req.file.path;
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            updateData,
+            { new: true }
+        ).select('-password -twoFactorSecret');
+
+        if (!updatedUser)
+            return res.status(404).json({ message: 'User not found' });
+
+        res.status(200).json({
+            message: 'User updated successfully',
+            user: updatedUser
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+//updateUserById for admin to update any user
 const updateUserById = async (req, res) => {
     try {
         const { password, role, ...updateData } = req.body;
-        const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true })
-            .select('-password -twoFactorSecret');
-            
-        if (!user) return res.status(404).json({ message: 'User not found' });
-        res.status(200).json({ message: 'User updated successfully', user });
-    } catch (error) {
-        res.status(500).json({ message: 'Server Error', error });
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ message: 'Forbidden: Admins only' });
+        }   
+        const userId = req.params.id;
+        if (req.file) {
+            updateData.profilePicture = req.file.path;
+        }       
+
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            updateData,
+            { new: true }
+        ).select('-password -twoFactorSecret');     
+        if (!updatedUser)
+            return res.status(404).json({ message: 'User not found' });
+        res.status(200).json({      
+            message: 'User updated successfully',
+            user: updatedUser
+        });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
 
@@ -240,80 +282,89 @@ const verify2FA = async (req, res) => {
     }
 };
 
-// 9. Forgot Password
+
 const forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
+
         const user = await User.findOne({ email });
 
         if (!user) {
-            return res.status(404).json({ message: 'User not found with this email' });
+            return res.status(200).json({
+                message: 'If email exists, reset link will be sent'
+            });
         }
 
-        // إنشاء توكن
         const resetToken = crypto.randomBytes(32).toString('hex');
-        
-        // تشفير وحفظ التوكن
-        user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-        
-        // صلاحية التوكن (ساعة واحدة = 3600000 مللي ثانية)
-        user.resetPasswordExpires = Date.now() + 3600000; 
+
+        user.passwordResetToken = crypto
+            .createHash('sha256')
+            .update(resetToken)
+            .digest('hex');
+
+        user.passwordResetExpires = Date.now() + 15 * 60 * 1000;
 
         await user.save();
 
-        
-        await sendResetPasswordEmail(user.email,resetToken);
-        
+        await sendResetPasswordEmail(user.email, resetToken);
 
-        res.status(200).json({ 
-            message: 'Email sent successfully (Simulated)', 
-            resetToken: resetToken // نرجعه هنا للتجربة
+        res.status(200).json({
+            message: 'Reset password link sent to email'
         });
 
     } catch (error) {
-        res.status(500).json({ message: 'Server Error', error: error.message });
+        res.status(500).json({
+            message: 'Server Error',
+            error: error.message
+        });
     }
 };
 
-// 10. Reset Password
-// 10. Reset Password (النسخة النهائية النظيفة)
 const resetPassword = async (req, res) => {
     try {
-        const { token } = req.params; 
+        const { token } = req.params;
         const { password } = req.body;
 
-        // 1. تنظيف وتشفير التوكن القادم من الرابط
-        const cleanToken = token.trim();
-        const hashedToken = crypto.createHash('sha256').update(cleanToken).digest('hex');
+        if (!password) {
+            return res.status(400).json({ message: 'Password is required' });
+        }
 
-        // 2. البحث عن المستخدم بشرطين:
-        // أ) التوكن مطابق
-        // ب) تاريخ الانتهاء لسه مجاش (أكبر من الوقت الحالي)
+        const hashedToken = crypto
+            .createHash('sha256')
+            .update(token)
+            .digest('hex');
+
         const user = await User.findOne({
-            resetPasswordToken: hashedToken,
-            resetPasswordExpires: { $gt: Date.now() }
+            passwordResetToken: hashedToken,
+            passwordResetExpires: { $gt: Date.now() }
         });
 
         if (!user) {
-            return res.status(400).json({ message: 'Invalid or expired token' });
+            return res.status(400).json({
+                message: 'Invalid or expired token'
+            });
         }
 
-        // 3. تحديث كلمة المرور
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(password, salt);
 
-        // 4. تنظيف حقول الاستعادة لمنع استخدام التوكن مرة أخرى
-        user.resetPasswordToken = undefined;
-        user.resetPasswordExpires = undefined;
+        user.passwordResetToken = undefined;
+        user.passwordResetExpires = undefined;
 
         await user.save();
 
-        res.status(200).json({ message: 'Password reset successful. You can now login.' });
+        res.status(200).json({
+            message: 'Password reset successful. You can now login.'
+        });
 
     } catch (error) {
-        res.status(500).json({ message: 'Server Error', error: error.message });
+        res.status(500).json({
+            message: 'Server Error',
+            error: error.message
+        });
     }
 };
+
 
 const verifyEmail = async (req, res) => {
     try {
@@ -379,5 +430,6 @@ module.exports = {
     forgotPassword,
     resetPassword,
     verifyEmail,
-    toggleBanUser
+    toggleBanUser,
+    updateUser
 };
