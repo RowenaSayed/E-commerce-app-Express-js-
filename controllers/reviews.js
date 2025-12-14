@@ -1,41 +1,56 @@
 const Review = require('../models/reviews');
 const Product = require('../models/products');
-const Order = require('../models/orders'); // You will need this for FR-R1 check
+const Order = require('../models/orders');
 
-// 1. Create Review
-// Handles FR-R1 (Verified), FR-R2 (Rating), FR-R8 (Unique check)
+// 1. Create Review (Strict Logic)
+// المسموح له فقط: Buyer (بشرط الشراء)
+// الممنوعين: Admin, Seller, Support
 const createReview = async (req, res) => {
     try {
         const user = req.user;
         if (!user) return res.status(401).json({ message: "Authentication required" });
 
-        // Added productCondition to destructuring as it is now required in Schema
+        // 🛑 1. التحقق من الرتبة (Role Check)
+        // بنمنع أي حد غير الـ "buyer" إنه يكتب ريفيو
+        if (user.role !== 'buyer') {
+            return res.status(403).json({ 
+                message: "Permission Denied: Only buyers can leave reviews. Sellers and Admins are not allowed." 
+            });
+        }
+
+        const userId = user._id || user.id;
         const { product, rating, comment, productCondition } = req.body;
 
         if (!product || !rating || !productCondition) {
-            return res.status(400).json({ message: "Product, rating, and product condition are required" });
+            return res.status(400).json({ message: "Product, rating, and condition are required" });
         }
 
-        const productExists = await Product.findById(product);
-        if (!productExists) return res.status(404).json({ message: "Product not found" });
+        // 🛑 2. التحقق من الشراء الفعلي (Verified Purchase Check)
+        const hasBought = await Order.findOne({ 
+            user: userId, 
+            "items.product": product,
+            status: "Delivered" 
+        });
 
-        // Logic for FR-R1 (Verified Purchase) - Optional implementation
-        const hasBought = await Order.findOne({ user: user._id, "items.product": product });
-        const verifiedPurchase = !!hasBought; 
+        if (!hasBought) {
+            return res.status(403).json({ 
+                message: "You can only review products you have purchased and received (Delivered)." 
+            });
+        }
 
+        // 3. الإنشاء
         const newReview = await Review.create({
             product,
-            user: user._id,
+            user: userId,
             rating,
             comment: comment || '',
-            productCondition, // Required for FR-R5 filtering
-            verifiedPurchase: false // Set to true if you implement the Order check above
+            productCondition, 
+            verifiedPurchase: true
         });
 
         res.status(201).json({ message: "Review added successfully!", review: newReview });
 
     } catch (error) {
-        // FR-R8: Handle Duplicate Review Error (MongoDB code 11000)
         if (error.code === 11000) {
             return res.status(400).json({ message: "You have already reviewed this product." });
         }
@@ -43,86 +58,87 @@ const createReview = async (req, res) => {
     }
 };
 
-// 2. Get All Reviews (With Filters & Sort)
-// Handles FR-R5 (Filter), FR-R7 (Sort), FR-R4 (Total Count implied)
+// 2. Get All Reviews (Public) - زي ما هي
 const getAllReviews = async (req, res) => {
     try {
         const { product, rating, condition, sort, verified } = req.query;
-
-        // --- Build Filter Object (FR-R5) ---
         const filterObj = {};
-        
-        // Filter by specific product (Mandatory for product details page)
+
         if (product) filterObj.product = product;
-        
-        // Filter by Star Rating
         if (rating) filterObj.rating = rating;
-        
-        // Filter by Condition (New/Used/Imported)
         if (condition) filterObj.productCondition = condition;
-        
-        // Filter by Verified Purchase Only
         if (verified === 'true') filterObj.verifiedPurchase = true;
 
-        // --- Build Sort Logic (FR-R7) ---
-        let sortStr;
-        switch (sort) {
-            case 'recent':
-                sortStr = '-createdAt'; // Most recent first
-                break;
-            case 'oldest':
-                sortStr = 'createdAt';
-                break;
-            case 'highest':
-                sortStr = '-rating'; // Highest stars first
-                break;
-            case 'lowest':
-                sortStr = 'rating';  // Lowest stars first
-                break;
-            case 'helpful':
-                sortStr = '-helpfulCount'; // Most helpful first
-                break;
-            default:
-                sortStr = '-createdAt'; // Default
-        }
+        let sortStr = '-createdAt';
+        if (sort === 'highest') sortStr = '-rating';
+        if (sort === 'lowest') sortStr = 'rating';
+        if (sort === 'helpful') sortStr = '-helpfulCount';
 
         const reviews = await Review.find(filterObj)
             .sort(sortStr)
-            .populate('user', 'name email') // Only get necessary user fields
-            .populate('product', 'name');   // Optional: populate product name
+            .populate('user', 'name') // نعرض اسم اليوزر بس
+            .populate('product', 'name');
 
-        res.status(200).json({ 
-            count: reviews.length, // FR-R4
-            reviews 
-        });
-
+        res.status(200).json({ count: reviews.length, reviews });
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
 
-// 3. Delete Review
-// Handles Admin check and updates Product stats
-const deleteReview = async (req, res) => {
+// 3. Mark Review Helpful (Buyer Only)
+// ممكن نسمح للأدمن يعمل لايك عادي، بس السيلر لأ (اختياري، هنا فتحتها لليوزر والأدمن)
+const markReviewHelpful = async (req, res) => {
     try {
-        const user = req.user;
-        // Basic Role Check
-        if (!user || user.role !== 'admin') {
-            return res.status(403).json({ message: "Only admin can delete reviews" });
-        }
-
-        const reviewId = req.params.id;
-        
-        // Find first to get product ID (needed for re-calculating average)
-        const review = await Review.findById(reviewId);
+        const review = await Review.findById(req.params.id);
         if (!review) return res.status(404).json({ message: "Review not found" });
 
-        await Review.findByIdAndDelete(reviewId);
+        const userId = req.user._id || req.user.id;
 
-        // Update the average rating on the Product Model (FR-R3)
-        // This calls the static function we defined in the Schema step
-        await Review.calcAverageRatings(review.product);
+        // منع المستخدم من التصويت لنفسه
+        if (review.user.toString() === userId.toString()) {
+            return res.status(400).json({ message: "You cannot vote on your own review" });
+        }
 
+        const isVoted = review.helpfulVoters.includes(userId);
+
+        if (isVoted) {
+            review.helpfulVoters.pull(userId);
+            review.helpfulCount = Math.max(0, review.helpfulCount - 1);
+        } else {
+            review.helpfulVoters.push(userId);
+            review.helpfulCount += 1;
+        }
+
+        await review.save();
+        res.status(200).json({ message: isVoted ? "Vote removed" : "Marked as helpful", helpfulCount: review.helpfulCount });
+    } catch (error) {
+        res.status(500).json({ message: "Server Error", error: error.message });
+    }
+};
+
+// 4. Delete Review (Updated Logic)
+// المسموح لهم:
+// أ) Admin (حذف أي ريفيو مسيء)
+// ب) Review Owner (حذف ريفيو كتبه بنفسه)
+const deleteReview = async (req, res) => {
+    try {
+        const userId = (req.user._id || req.user.id).toString();
+        const userRole = req.user.role;
+
+        const review = await Review.findById(req.params.id);
+        if (!review) return res.status(404).json({ message: "Review not found" });
+
+        // التحقق من الصلاحية
+        const isOwner = review.user.toString() === userId;
+        const isAdmin = userRole === 'admin';
+
+        if (!isAdmin && !isOwner) {
+            return res.status(403).json({ message: "Access Denied. You can only delete your own reviews." });
+        }
+
+        await Review.findByIdAndDelete(req.params.id);
+        
+        // المودل هيحدث متوسط التقييمات تلقائياً
         res.status(200).json({ message: "Review deleted successfully" });
 
     } catch (error) {
@@ -130,8 +146,4 @@ const deleteReview = async (req, res) => {
     }
 };
 
-module.exports = {
-    createReview,
-    getAllReviews,
-    deleteReview
-};
+module.exports = { createReview, getAllReviews, markReviewHelpful, deleteReview };

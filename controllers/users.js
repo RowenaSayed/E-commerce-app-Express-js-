@@ -346,6 +346,26 @@ const verifyEmail = async (req, res) => {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
+const toggleBanUser = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        if (user.role === 'admin') {
+            return res.status(403).json({ message: "Cannot ban an admin" });
+        }
+
+        user.isBanned = !user.isBanned; // عكس الحالة
+        await user.save();
+
+        res.json({ 
+            message: user.isBanned ? "User has been banned" : "User has been unbanned", 
+            isBanned: user.isBanned 
+        });
+    } catch (err) {
+        res.status(500).json({ message: "Server Error" });
+    }
+};
 
 module.exports = {
     createUser,
@@ -358,5 +378,6 @@ module.exports = {
     verify2FA,
     forgotPassword,
     resetPassword,
-    verifyEmail
+    verifyEmail,
+    toggleBanUser
 };

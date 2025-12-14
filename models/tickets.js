@@ -2,12 +2,17 @@ const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
 const TicketSchema = new Schema({
-    // تم حذف ticketNumber هنا
-    
-    // FR-CS2: ربط التذكرة بالمستخدم (صاحب المشكلة)
+    // FR-CS4: Unique Ticket Number (سيتم تمريره من الكنترولر)
+    ticketNumber: { 
+        type: String, 
+        required: true, 
+        unique: true 
+    },
+
+    // FR-CS2: ربط التذكرة بالمستخدم
     user: { type: Schema.Types.ObjectId, ref: "User", required: true },
 
-    // FR-CS1: تفاصيل الاتصال (يتم حفظها كنسخة ثابتة وقت الإنشاء)
+    // FR-CS1: تفاصيل الاتصال
     contactDetails: {
         name: { type: String, required: true },
         email: { type: String, required: true },
@@ -41,21 +46,18 @@ const TicketSchema = new Schema({
         default: "Open" 
     },
 
-    // الموظف المسؤل عن التذكرة
+    // الموظف المسؤول
     assignedTo: { type: Schema.Types.ObjectId, ref: "User" },
 
-    // تاريخ المحادثة
+    // الردود
     responses: [
         {
             sender: { type: Schema.Types.ObjectId, ref: "User" }, 
-            // ✅ تصحيح: توحيد الأدوار بأحرف صغيرة لتجنب أخطاء Validation
-            role: { type: String, enum: ["buyer", "support", "admin","seller"], required: true }, 
+            role: { type: String, enum: ["buyer", "support", "admin", "seller"], required: true }, 
             message: String,
             date: { type: Date, default: Date.now },
         },
     ],
 }, { timestamps: true });
-
-// ❌ تم حذف TicketSchema.pre("save", ...) بالكامل
 
 module.exports = mongoose.model("Ticket", TicketSchema);

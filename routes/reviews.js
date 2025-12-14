@@ -1,26 +1,24 @@
 const express = require('express');
 const router = express.Router();
-
-// Import Controllers
+const { auth, authorize } = require('../middleware/auth');
 const { 
     createReview, 
     getAllReviews, 
-    deleteReview 
+    deleteReview,
+    markReviewHelpful 
 } = require('../controllers/reviews');
 
-// Import Middleware
-const { auth, authorize } = require('../middleware/auth');
-
-// FR-R1 & FR-R8: Create Review
-// Only logged-in users can write. Logic for "Verified Purchase" is handled inside the controller.
-router.post('/', auth, createReview);
-
-// FR-R5 & FR-R7: Get All Reviews
-// Public route (no auth needed) so anyone can see product ratings.
+// 1. عرض الريفيوهات (مفتوح للكل)
 router.get('/', getAllReviews);
 
-// Delete Review
-// Restricted to Admin only to match the Controller logic
-router.delete('/:id', auth, authorize('admin'), deleteReview);
+// 2. إنشاء ريفيو (Auth فقط، والتحقق من الرتبة بيتم جوه الكنترولر)
+router.post('/', auth, createReview);
+
+// 3. تصويت مفيد (Auth Required)
+router.put('/:id/helpful', auth, markReviewHelpful);
+
+// 4. حذف ريفيو (Auth Required)
+// شيلنا authorize('admin') من هنا، وهندلناها جوه الكنترولر عشان نسمح لصاحب الريفيو يمسحه
+router.delete('/:id', auth, deleteReview);
 
 module.exports = router;
