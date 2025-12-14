@@ -49,6 +49,7 @@ app.get('/test-session', (req, res) => {
     res.json({ views: req.session.views, sessionID: req.sessionID, session: req.session });
 });
 
+
 mongoose.connect(process.env.MONGO_URI)
     .then(() => {
         console.log('MongoDB Connected successfully');
