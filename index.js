@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const sessionMiddleware = require('./middleware/session');
-
+// const upload = require('./utilities/fileUpload');   
 const app = express();
 const PORT = process.env.PORT || 8000;
 
@@ -14,6 +14,7 @@ app.use(cors({
     origin: true,
     credentials: true
 }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.json());
 app.use(sessionMiddleware);
 
