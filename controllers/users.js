@@ -97,13 +97,10 @@ const login = async (req, res) => {
             });
         }
 
-        // =====================
         // Merge Guest Cart
-        // =====================
         const guestCart = await Cart.findOne({ sessionId: req.sessionID });
         const userCart = await Cart.findOne({ user: user._id });
-        console.log('User Cart:', userCart);
-            console.log('Guest Cart:', guestCart);
+
         if (guestCart) {
             if (userCart) {
                 guestCart.items.forEach(gItem => {
@@ -118,15 +115,14 @@ const login = async (req, res) => {
                 await Cart.deleteOne({ _id: guestCart._id });
             } else {
                 guestCart.user = user._id;
-                guestCart.sessionId = undefined; 
+                guestCart.sessionId = undefined;
                 await guestCart.save();
             }
         }
 
-        // =====================
-        // Issue token
-        // =====================
+        // Issue JWT token
         const token = jwt.sign({ id: user._id, role: user.role }, secret, { expiresIn: '1d' });
+
         res.status(200).json({
             message: 'Login successful',
             token,
@@ -137,7 +133,6 @@ const login = async (req, res) => {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
-
 
 // 3. Get User
 const getUserById = async (req, res) => {

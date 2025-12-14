@@ -732,7 +732,9 @@ const updateCartItem = async (req, res) => {
         const { item_id } = req.params;
         if ( quantity === undefined) return res.status(400).json({ message: 'Item ID and quantity required' });
 
-        const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
+        console.log('Session ID:', req.sessionID);
+        console.log(req.user.id)
+     const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         const cart = await Cart.findOne(query);
         if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
@@ -766,14 +768,14 @@ const updateCartItem = async (req, res) => {
 
 const removeCartItem = async (req, res) => {
     try {
-        const { product_id } = req.body;
-        if (!product_id) return res.status(400).json({ message: 'Product ID required' });
+        const { item_id } = req.params;
+        if (!item_id) return res.status(400).json({ message: 'item ID required' });
 
         const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         const cart = await Cart.findOne(query);
         if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
-        cart.items = cart.items.filter(i => i.product.toString() !== product_id);
+        cart.items = cart.items.filter(i => i._id.toString() !== item_id);
         await cart.save();
 
         const populated = await cart.populate('items.product');
@@ -783,6 +785,7 @@ const removeCartItem = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
+
 
 const clearCart = async (req, res) => {
     try {
@@ -861,29 +864,40 @@ const initiatePayment = async (req, res) => {
                 order: newOrder
             });
             
-        } else if (paymentMethod === 'Online') {
-            // 4.2. Stripe/Online Payment Gateway
-            
+        }
+        else if(paymentMethod === 'Online') {
             const lineItems = cart.items.map(item => ({
-                // ... (إعداد Line Items للمنتجات)
+                price_data: {
+                    currency: 'egp',
+                    product_data: { name: item.product.name },
+                    unit_amount: Math.round(item.product.price * 100), // تحويل السعر لـ cents
+                },
+                quantity: item.quantity,
             }));
-            
-            // إضافة الشحن
+
             if (totals.deliveryFee > 0) {
-                 lineItems.push({ 
-                    price_data: { currency: 'egp', product_data: { name: 'Shipping Fee' }, unit_amount: Math.round(totals.deliveryFee * 100) }, 
-                    quantity: 1 
+                lineItems.push({
+                    price_data: {
+                        currency: 'egp',
+                        product_data: { name: 'Shipping Fee' },
+                        unit_amount: Math.round(totals.deliveryFee * 100),
+                    },
+                    quantity: 1,
                 });
             }
 
             const session = await stripe.checkout.sessions.create({
-                // ... (إعداد جلسة Stripe)
+                payment_method_types: ['card'],
+                mode: 'payment',
                 line_items: lineItems,
                 metadata: { userId: userId.toString(), shippingAddressId: shippingAddressId.toString() },
+                success_url: 'http://localhost:8000/success',
+                cancel_url: 'http://localhost:8000/cancel',
             });
-            
+
             return res.json({ id: session.id, url: session.url, message: "Redirecting to payment gateway" });
         }
+
     } catch (err) {
         console.error("Checkout error:", err);
         return res.status(500).json({ message: "Server error during checkout process", error: err.message });

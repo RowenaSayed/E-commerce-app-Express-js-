@@ -69,6 +69,5 @@ internalNotes: { type: String }, // FR-A17: ملاحظات للأدمن فقط
     }
 }, { timestamps: true });
 
-// ❌ تم حذف الـ pre('save') hook من هنا
 
 module.exports = mongoose.model('Order', OrderSchema);
