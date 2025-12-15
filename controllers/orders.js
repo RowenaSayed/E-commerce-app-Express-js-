@@ -27,86 +27,180 @@ const calculateDeliveryDate = (governate, deliveryType = 'standard') => {
     }
     return estimatedDate;
 };
+const calculateAdminOrderTotals = (itemsWithPrice, governate, deliveryMethod = 'standard') => {
+    let subtotal = 0;
+    const vatRate = 0.14; 
+    
+    itemsWithPrice.forEach(item => {
+        // item: { priceAtPurchase, quantity }
+        subtotal += item.priceAtPurchase * item.quantity; 
+    });
+
+    let deliveryFee = governate?.fee || 0;
+    if (deliveryMethod === 'express') {
+        deliveryFee = Math.round(deliveryFee * 1.5); // زيادة 50% للشحن السريع
+    }
+    
+    const VAT = subtotal * vatRate;
+    const total = subtotal + deliveryFee + VAT;
+
+    return { subtotal, deliveryFee, VAT, total };
+};
+// 1. Create Order
 // 1. Create Order
 const createOrder = async (req, res) => {
     try {
         const user = req.user;
         if (!user) return res.status(401).json({ message: "Authentication required" });
 
-        // 🛑 تغيير country إلى governorate ليتطابق مع المودل
-        const { shippingAddress, paymentMethod, promo, deliveryType = 'standard' } = req.body; 
+        const { shippingAddress, paymentMethod, promo } = req.body;
 
         if (!paymentMethod) return res.status(400).json({ message: "Payment method required" });
 
-        // Get user's cart (Populate to get prices)
-        const cart = await Cart.findOne({ user: user._id || user.id }).populate('items.product');
+        // Get user's cart
+        const cart = await Cart.findOne({ user: user._id || user.id });
 
         if (!cart || !cart.items || cart.items.length === 0) {
-            return res.status(400).json({ message: "Your cart is empty. Add items to cart first" });
+            return res.status(400).json({
+                message: "Your cart is empty. Add items to cart first"
+            });
         }
 
-        // 1. التحقق من العنوان والمحافظة
-        const requiredAddressFields = ['phone', 'address', 'city', 'governorate'];
+        // Validate shipping address
+        if (!shippingAddress) return res.status(400).json({ message: "Shipping address required" });
+
+        const requiredAddressFields = ['phone', 'address', 'city', 'country'];
         for (const field of requiredAddressFields) {
             if (!shippingAddress[field]) {
-                return res.status(400).json({ message: `Shipping address ${field} is required` });
+                return res.status(400).json({
+                    message: `Shipping address ${field} is required`
+                });
             }
         }
-        
-        const governateInfo = await Governate.findOne({ name: shippingAddress.governorate });
-        if (!governateInfo) {
-             return res.status(400).json({ message: `Invalid governorate name: ${shippingAddress.governorate}` });
-        }
-
 
         let subtotal = 0;
         const orderItems = [];
 
-        // 2. معالجة العناصر والمخزون
+        // Process items from cart
         for (const cartItem of cart.items) {
-            //const product = cartItem.product; 
-            // ⚠️ هنا يجب التأكد من عمل populate لـ cart بشكل صحيح قبل استخدام product مباشرة
-            // نفترض أن cart.populate('items.product') تم تنفيذه في مسار آخر أو يجب تنفيذه هنا:
             const product = await Product.findById(cartItem.product);
-            //  // إذا لم يكن هناك populate
-            
-            // ... (منطق التحقق من المخزون والتوفر) ...
+            if (!product) {
+                return res.status(404).json({
+                    message: `Product ${cartItem.product} not found or has been removed`
+                });
+            }
+
+            if (product.stockQuantity < cartItem.quantity) {
+                return res.status(400).json({
+                    message: `Not enough stock for ${product.name}. Available: ${product.stockQuantity}, Requested: ${cartItem.quantity}`
+                });
+            }
+
+            if (product.visibility !== "Published" || product.isDeleted) {
+                return res.status(400).json({
+                    message: `Product ${product.name} is not available for purchase`
+                });
+            }
 
             const itemPrice = product.price;
             subtotal += itemPrice * cartItem.quantity;
 
-            // ... (تخفيض المخزون وإضافة العنصر لـ orderItems) ...
+            orderItems.push({
+                product: cartItem.product,
+                name: product.name,
+                quantity: cartItem.quantity,
+                price: itemPrice,
+                condition: product.condition || 'New'
+            });
+
+            // Deduct stock and update sold count
+            product.stockQuantity -= cartItem.quantity;
+            product.sold += cartItem.quantity;
+            await product.save();
         }
 
-        // 3. منطق الخصم (يبقى كما هو، مع تحديث promoDoc لتطبيق الخصم على الشحن)
+        // Promo logic
         let discount = 0;
         let promoApplied = null;
-        let promoDoc = null; 
-        
-        // ... (منطق حساب الخصم) ...
 
+        if (promo) {
+            const promoDoc = await Promotion.findOne({
+                code: promo.toUpperCase(),
+                active: true
+            });
 
-        // 4. حساب رسوم الشحن والتسليم
-        let deliveryFee = governateInfo.fee;
-        if (deliveryType === 'express') {
-            deliveryFee = Math.round(deliveryFee * 1.5); // 50% extra
+            if (promoDoc) {
+                const now = new Date();
+                if (promoDoc.startDate <= now && promoDoc.endDate >= now) {
+                    if (!promoDoc.minPurchase || subtotal >= promoDoc.minPurchase) {
+
+                        // Check usage limits
+                        if (promoDoc.totalUsageLimit && promoDoc.usedCount >= promoDoc.totalUsageLimit) {
+                            return res.status(400).json({
+                                message: "Promo code usage limit reached"
+                            });
+                        }
+
+                        // Check user usage limit
+                        const userUsage = promoDoc.usedBy.find(u => u.user.toString() === user.id);
+                        if (promoDoc.usageLimitPerUser && userUsage && userUsage.count >= promoDoc.usageLimitPerUser) {
+                            return res.status(400).json({
+                                message: "You have reached your usage limit for this promo"
+                            });
+                        }
+
+                        // Apply discount based on type
+                        if (promoDoc.type === "Percentage") {
+                            discount = (subtotal * promoDoc.value) / 100;
+                        } else if (promoDoc.type === "Fixed") {
+                            discount = Math.min(promoDoc.value, subtotal);
+                        } else if (promoDoc.type === "FreeShipping") {
+                            discount = 10; // delivery fee
+                        }
+
+                        // Record usage
+                        if (!userUsage) {
+                            promoDoc.usedBy.push({ user: user.id, count: 1 });
+                        } else {
+                            userUsage.count += 1;
+                        }
+                        promoDoc.usedCount += 1;
+                        await promoDoc.save();
+                        promoApplied = promoDoc.code;
+                    }
+                }
+            }
         }
-        
-        // تطبيق الشحن المجاني (إن وجد)
-        if (promoDoc && promoDoc.type === "FreeShipping") {
-             discount += deliveryFee;
-             deliveryFee = 0;
-        }
-        
+
         const VAT = subtotal * 0.14;
+        const deliveryFee = 10;
         const totalAmount = subtotal + VAT + deliveryFee - discount;
         const paymentStatus = paymentMethod === 'Online' ? 'Paid' : 'Pending';
 
-        // 5. حساب تاريخ التسليم
-        const estimatedDate = calculateDeliveryDate(governateInfo, deliveryType);
+        // Generate unique order number
+        let generatedOrderNumber;
+        let isUnique = false;
 
-        // 6. إنشاء الطلب (مع استخدام generateOrderNumber)
-        // ... (منطق توليد رقم الطلب) ...
+        while (!isUnique) {
+            const prefix = "ORD";
+            const random = Math.floor(1000 + Math.random() * 9000);
+            const timestamp = Date.now().toString().slice(-6);
+            generatedOrderNumber = `${prefix}-${timestamp}-${random}`;
+
+            const existingOrder = await Order.findOne({ orderNumber: generatedOrderNumber });
+            if (!existingOrder) isUnique = true;
+        }
+
+        // Calculate estimated delivery date (5 business days)
+        const estimatedDate = new Date();
+        let daysAdded = 0;
+        while (daysAdded < 5) {
+            estimatedDate.setDate(estimatedDate.getDate() + 1);
+            // Skip weekends (0 = Sunday, 6 = Saturday)
+            if (estimatedDate.getDay() !== 0 && estimatedDate.getDay() !== 6) {
+                daysAdded++;
+            }
+        }
 
         const newOrder = new Order({
             user: user._id || user.id,
@@ -117,23 +211,38 @@ const createOrder = async (req, res) => {
                 address: shippingAddress.address,
                 city: shippingAddress.city,
                 postalCode: shippingAddress.postalCode || "00000",
-                country: shippingAddress.country || 'Egypt', 
-                phone: shippingAddress.phone,
-                governorate: shippingAddress.governorate // حفظ المحافظة
+                country: shippingAddress.country,
+                phone: shippingAddress.phone
             },
             paymentMethod: paymentMethod,
             paymentStatus: paymentStatus,
             totalAmount: totalAmount,
             VAT: VAT,
-            deliveryFee: deliveryFee, // 🚀 رسوم الشحن المحسوبة
+            deliveryFee: deliveryFee,
             discount: discount,
-            orderStatus: "Order Placed"
+            status: "Order Placed"
         });
 
         await newOrder.save();
-        // ... (تفريغ السلة وإرسال الإيميل) ...
 
-        res.status(201).json({ /* ... (بيانات الاستجابة) ... */ });
+        // Clear the cart after successful order
+        cart.items = [];
+        await cart.save();
+
+        res.status(201).json({
+            success: true,
+            message: "Order placed successfully",
+            order: {
+                orderNumber: newOrder.orderNumber,
+                totalAmount: newOrder.totalAmount,
+                estimatedDeliveryDate: newOrder.estimatedDeliveryDate,
+                paymentStatus: newOrder.paymentStatus,
+                status: newOrder.status,
+                discountApplied: discount > 0 ? discount : 0,
+                promoCode: promoApplied,
+                cartCleared: true
+            }
+        });
 
     } catch (err) {
         console.error("Order creation error:", err);
@@ -142,6 +251,115 @@ const createOrder = async (req, res) => {
             message: "Server error",
             error: err.message
         });
+    }
+};
+const adminCreateOrder = async (req, res) => {
+    try {
+        // 1. استخراج البيانات من جسم الطلب
+        const {
+            userId, // 🛑 ID العميل
+            items, // [ { product: ID, quantity: N, condition: 'New' } ]
+            shippingAddress, 
+            paymentMethod,
+            deliveryMethod = 'standard',
+            internalNotes // FR-A17: ملاحظات داخلية
+        } = req.body;
+
+        // 2. التحقق من البيانات المطلوبة
+        if (!userId || !items || items.length === 0 || !shippingAddress || !shippingAddress.governorate || !paymentMethod) {
+            return res.status(400).json({ message: "Missing required fields (userId, items, shippingAddress.governorate, paymentMethod)." });
+        }
+        
+        // 3. جلب معلومات المحافظة (لحساب الشحن ولحل مشكلة Governate is not defined)
+        const governateInfo = await Governate.findOne({ name: shippingAddress.governorate });
+        if (!governateInfo) {
+            return res.status(400).json({ message: `Invalid governorate name: ${shippingAddress.governorate} or not found.` });
+        }
+        
+        // 4. التحقق من المخزون وتجهيز بيانات الأصناف
+        let itemsForCalculation = [];
+        let orderItems = [];
+        
+        for (const item of items) {
+            const productDoc = await Product.findById(item.product);
+            
+            // تحقق من وجود المنتج وكمية المخزون
+            if (!productDoc || productDoc.stockQuantity < item.quantity) {
+                 return res.status(400).json({ message: `Insufficient stock for product: ${productDoc?.name || item.product}` });
+            }
+            
+            itemsForCalculation.push({ 
+                priceAtPurchase: productDoc.price, 
+                quantity: item.quantity 
+            });
+            
+            // تجهيز العنصر للحفظ في موديل Order (باستخدام السعر الحالي)
+            orderItems.push({
+                product: item.product,
+                quantity: item.quantity,
+                priceAtPurchase: productDoc.price, 
+                name: productDoc.name,
+                condition: item.condition || 'New'
+            });
+        }
+
+        // 5. حساب الإجماليات
+        const totals = calculateAdminOrderTotals(
+            itemsForCalculation,
+            governateInfo, 
+            deliveryMethod
+        );
+
+        // 6. إنشاء رقم الطلب وتاريخ التسليم
+        // 🛑 استخدم رقم طلب مميز لطلبات الأدمن
+        const generatedOrderNumber = `ADM-${Date.now()}`; 
+        const estimatedDate = calculateDeliveryDate(governateInfo, deliveryMethod);
+
+        // 7. إنشاء الطلب في قاعدة البيانات
+        const newOrder = new Order({
+            user: userId,
+            orderNumber: generatedOrderNumber,
+            estimatedDeliveryDate: estimatedDate,
+            deliveryMethod: deliveryMethod,
+            items: orderItems,
+            shippingAddress: {
+                address: shippingAddress.address,
+                governorate: shippingAddress.governorate,
+                city: shippingAddress.city,
+                postalCode: shippingAddress.postalCode || "00000",
+                country: shippingAddress.country,
+                phone: shippingAddress.phone
+            },
+            paymentMethod: paymentMethod,
+            paymentStatus: paymentMethod === 'COD' ? 'Pending' : 'Processing', // إذا كان اونلاين، يجب أن يكون هناك تأكيد للدفع
+            totalAmount: totals.total,
+            VAT: totals.VAT,
+            deliveryFee: totals.deliveryFee,
+            discount: discount, 
+            status: "Order Placed by Admin",
+            isCreatedByAdmin: true,
+            internalNotes: internalNotes // حفظ ملاحظات الأدمن
+        });
+        
+        await newOrder.save();
+        
+        // 8. تخفيض المخزون
+        for (const item of orderItems) {
+            await Product.findByIdAndUpdate(item.product, { 
+                $inc: { stockQuantity: -item.quantity } 
+            });
+        }
+        
+        res.status(201).json({
+            success: true,
+            message: "Order created successfully by Admin.",
+            order: newOrder
+        });
+
+    } catch (err) {
+        console.error("Admin Order Creation Error:", err);
+        // يمكنك إرجاع رسالة خطأ أكثر تفصيلاً في بيئة التطوير
+        res.status(500).json({ message: "Server error", error: err.message });
     }
 };
 // 2. Get Orders (FR-O1, FR-O6)
@@ -425,5 +643,6 @@ module.exports = {
     cancelOrder,
     requestReturn,
     updateOrderStatus,
-    deleteOrder
+    deleteOrder,
+    adminCreateOrder
 };

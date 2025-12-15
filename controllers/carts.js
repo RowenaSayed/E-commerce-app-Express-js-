@@ -2,7 +2,7 @@ const Cart = require('../models/carts');
 const Product = require('../models/products');
 const Governate = require('../models/governates');
 const User = require('../models/users');
-const Promotion = require('../models/promos'); 
+const Promotion = require('../models/promos');
 const Order = require('../models/orders'); // 🚀 مودل الطلبات
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY); // 🚀 تهيئة Stripe
 const { createFinalOrder, finalizeOrder } = require('../utilities/orderCreation'); // 🚀 يجب إنشاء هذا الملف
@@ -11,7 +11,7 @@ const { sendOrderConfirmationEmail } = require('../utilities/email'); // 🚀 د
 // 🚀 Helper function to calculate cart totals (مُعدَّلة لتقبل الخصومات والشحن المجاني)
 const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', discountAmount = 0, freeShipping = false) => {
     let subtotal = 0;
-
+    let itemsTotal = 0;
     // 1. حساب الإجمالي الفرعي قبل الخصم
     cart.items.forEach(item => {
         if (item.product && item.product.price) {
@@ -24,19 +24,26 @@ const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', disco
     if (deliveryMethod === 'express') {
         deliveryFee = Math.round(deliveryFee * 1.5);
     }
-    
+
     // 3. تطبيق الشحن المجاني
     if (freeShipping) {
         deliveryFee = 0;
     }
-    
+
     // 4. تطبيق الخصم
+    let finalDiscount = Math.min(discountAmount, subtotal);
     let finalSubtotal = subtotal - discountAmount;
     if (finalSubtotal < 0) finalSubtotal = 0;
 
     // 5. حساب VAT (بعد الخصم)
     const vatRate = 0.14;
     const vat = finalSubtotal * vatRate;
+
+
+    // 5. تطبيق الشحن المجاني
+    if (freeShipping) {
+        deliveryFee = 0;
+    }
 
     // 6. الإجمالي النهائي
     const total = finalSubtotal + deliveryFee + vat;
@@ -48,7 +55,7 @@ const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', disco
         vat,
         total,
         discount: discountAmount,
-        vatRate: vatRate * 100 
+        vatRate: vatRate
     };
 };
 // Helper to calculate estimated delivery date
@@ -170,17 +177,50 @@ const getCart = async (req, res) => {
 
         if (!cart) return res.json({ items: [] });
 
-        // Filter out out-of-stock items
-        cart.items = cart.items.filter(item => item.product?.stockQuantity > 0);
+        let itemsWereRemoved = false;
+        let quantitiesWereAdjusted = false;
 
-        // Calculate totals
+        // 🚀 البدء في منطق التنظيف الذكي للسلة
+        const updatedItems = cart.items.filter(item => {
+            const product = item.product;
+
+            // 1. التحقق من وجود المنتج وكمية المخزون
+            if (!product || product.stockQuantity <= 0) {
+                itemsWereRemoved = true;
+                return false; // إزالة العنصر بالكامل (نفد المخزون)
+            }
+
+            // 2. التحقق من تجاوز الكمية المطلوبة للمخزون
+            if (item.quantity > product.stockQuantity) {
+                item.quantity = product.stockQuantity; // ضبط الكمية لتساوي المخزون المتوفر
+                quantitiesWereAdjusted = true;
+            }
+
+            return true; // إبقاء العنصر
+        });
+
+        // 3. تحديث وحفظ السلة إذا حدثت أي تعديلات
+        if (itemsWereRemoved || quantitiesWereAdjusted) {
+            cart.items = updatedItems;
+
+            // إعادة تعيين أي خصم مطبق، حيث أن محتوى السلة قد تغير الآن
+            cart.discountCode = undefined;
+            cart.discountAmount = undefined;
+            cart.freeShipping = undefined;
+
+            await cart.save();
+        } else {
+            await cart.save(); // حفظ عادي لأي تحديثات أخرى
+        }
+
+        // 4. حساب الإجماليات
         let totals = {
             subtotal: 0,
             deliveryFee: 0,
             vat: 0,
             total: 0,
-            discount: 0,
-            discountCode: null,
+            discount: cart.discountAmount || 0, // استخدام الخصم المُعاد تعيينه (عادة 0)
+            discountCode: cart.discountCode || null,
             vatRate: 14
         };
 
@@ -192,23 +232,32 @@ const getCart = async (req, res) => {
                 }
             });
 
-            // Apply discount if exists
-            if (cart.discountCode && cart.discountAmount) {
-                totals.discount = cart.discountAmount;
-                totals.discountCode = cart.discountCode;
-                totals.subtotal -= cart.discountAmount;
-                if (totals.subtotal < 0) totals.subtotal = 0;
-            }
+            // Apply discount if exists (هذا المنطق سيعمل الآن بقيمة الخصم الجديدة بعد التنظيف)
+            let finalSubtotal = totals.subtotal - totals.discount;
+            if (finalSubtotal < 0) finalSubtotal = 0;
 
             // Calculate VAT (14%)
-            totals.vat = totals.subtotal * 0.14;
-            totals.total = totals.subtotal + totals.vat;
+            totals.vat = finalSubtotal * 0.14;
+            totals.total = finalSubtotal + totals.vat;
         }
 
-        await cart.save();
-        res.json({ cart, totals });
+        // 5. إرجاع رسالة تنبيه للمستخدم
+        let message = "Cart retrieved successfully.";
+        if (itemsWereRemoved) {
+            message = "Some items were automatically removed due to insufficient stock.";
+        } else if (quantitiesWereAdjusted) {
+            message = "Quantity of some items was reduced to match available stock.";
+        }
+
+
+        res.json({
+            cart,
+            totals,
+            message
+        });
 
     } catch (err) {
+        console.error("getCart Error:", err);
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -605,7 +654,7 @@ const applyPromotionCode = async (req, res) => {
         cart.promotionType = validation.promotion.type;
         await cart.save();
 
-      
+
         // Get governate for calculation (if available)
         let governate = null;
         if (req.query.governateId) {
@@ -730,11 +779,9 @@ const updateCartItem = async (req, res) => {
     try {
         const { quantity } = req.body;
         const { item_id } = req.params;
-        if ( quantity === undefined) return res.status(400).json({ message: 'Item ID and quantity required' });
+        if (quantity === undefined) return res.status(400).json({ message: 'Item ID and quantity required' });
 
-        console.log('Session ID:', req.sessionID);
-        console.log(req.user.id)
-     const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
+        const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         const cart = await Cart.findOne(query);
         if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
@@ -768,14 +815,14 @@ const updateCartItem = async (req, res) => {
 
 const removeCartItem = async (req, res) => {
     try {
-        const { item_id } = req.params;
-        if (!item_id) return res.status(400).json({ message: 'item ID required' });
+        const { product_id } = req.body;
+        if (!product_id) return res.status(400).json({ message: 'Product ID required' });
 
         const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         const cart = await Cart.findOne(query);
         if (!cart) return res.status(404).json({ message: 'Cart not found' });
 
-        cart.items = cart.items.filter(i => i._id.toString() !== item_id);
+        cart.items = cart.items.filter(i => i.product.toString() !== product_id);
         await cart.save();
 
         const populated = await cart.populate('items.product');
@@ -785,7 +832,6 @@ const removeCartItem = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
-
 
 const clearCart = async (req, res) => {
     try {
@@ -814,7 +860,7 @@ const initiatePayment = async (req, res) => {
 
         const { paymentMethod, shippingAddressId, deliveryMethod = 'standard' } = req.body;
 
-        if (!['COD', 'Online'].includes(paymentMethod)) { 
+        if (!['COD', 'Online'].includes(paymentMethod)) {
             return res.status(400).json({ message: "Invalid payment method. Only 'COD' or 'Online' are supported." });
         }
 
@@ -830,10 +876,10 @@ const initiatePayment = async (req, res) => {
 
         // 2. حساب الإجماليات النهائية
         const governate = await Governate.findOne({ name: shippingAddress.governorate });
-        
+
         // 🛑 تمرير جميع معلمات الخصم والشحن
         const totals = calculateCartTotals(
-            cart, governate, deliveryMethod, 
+            cart, governate, deliveryMethod,
             cart.discountAmount || 0, cart.freeShipping || false
         );
 
@@ -841,66 +887,145 @@ const initiatePayment = async (req, res) => {
         for (const item of cart.items) {
             const product = await Product.findById(item.product._id);
             if (!product || product.stockQuantity < item.quantity) {
-                 return res.status(400).json({ message: `Insufficient stock for ${item.product.name}` });
+                return res.status(400).json({ message: `Insufficient stock for ${item.product.name}` });
             }
         }
 
         // ==========================================================
         // 4. منطق الدفع (COD/Stripe)
         // ==========================================================
-        
+
         if (paymentMethod === 'COD') {
             // 4.1. Cash on Delivery
-            
+
             // إنشاء الطلب مباشرة (FR-C18 & FR-C20)
             const newOrder = await createFinalOrder(userId, userDoc, shippingAddress, totals, 'COD', 'Pending', cart);
-            
+
             // FR-C19: إرسال التأكيد وتخفيض المخزون وتفريغ السلة
             await sendOrderConfirmationEmail(userDoc.email, userDoc.name, newOrder.orderNumber, newOrder.totalAmount);
-            await finalizeOrder(cart); 
-            
+            await finalizeOrder(cart);
+
             return res.status(201).json({
                 message: "Order placed successfully (Cash on Delivery). Payment is Pending.",
                 order: newOrder
             });
-            
-        }
-        else if(paymentMethod === 'Online') {
-            const lineItems = cart.items.map(item => ({
-                price_data: {
-                    currency: 'egp',
-                    product_data: { name: item.product.name },
-                    unit_amount: Math.round(item.product.price * 100), // تحويل السعر لـ cents
-                },
-                quantity: item.quantity,
-            }));
 
-            if (totals.deliveryFee > 0) {
-                lineItems.push({
+        } else if (paymentMethod === 'Online') {
+            // 4.2. Stripe/Online Payment Gateway
+
+            const lineItems = cart.items.map(item => {
+                // سعر الوحدة قبل الخصم والضريبة
+                const unitPrice = item.product.price;
+
+                // ⚠️ يجب أن يتم تطبيق الخصم والـ VAT على كل صنف هنا بشكل أكثر تعقيداً
+                // ولكن للتبسيط وتجنب تعقيدات (منطق الخصم الموزع)، سنعتمد على الإجمالي النهائي
+
+                // نسبة مساهمة المنتج في الإجمالي الفرعي (قبل الخصم)
+                const productRatio = (unitPrice * item.quantity) / totals.subtotal;
+
+                // حصة المنتج من finalSubtotal (بعد الخصم)
+                const discountedProductPrice = (totals.finalSubtotal * productRatio) / item.quantity;
+
+                // حصة المنتج من VAT
+                const productVAT = (totals.vat * productRatio) / item.quantity;
+
+                // السعر النهائي للوحدة شامل الضريبة (بعد الخصم)
+                const finalUnitPrice = discountedProductPrice + productVAT;
+
+                return {
                     price_data: {
                         currency: 'egp',
-                        product_data: { name: 'Shipping Fee' },
-                        unit_amount: Math.round(totals.deliveryFee * 100),
+                        product_data: { name: item.product.name },
+                        // يجب أن يكون المبلغ بالوحدات الصغرى (قروش)، لذا نضرب في 100
+                        unit_amount: Math.round(finalUnitPrice * 100),
                     },
-                    quantity: 1,
+                    quantity: item.quantity,
+                };
+            });
+
+            // ... (إعداد Line Items للمنتجات)
+
+
+            // إضافة الشحن
+            if (totals.deliveryFee > 0) {
+                lineItems.push({
+                    price_data: { currency: 'egp', product_data: { name: 'Shipping Fee' }, unit_amount: Math.round(totals.deliveryFee * 100) },
+                    quantity: 1
                 });
             }
 
             const session = await stripe.checkout.sessions.create({
+                // ... (إعداد جلسة Stripe)
                 payment_method_types: ['card'],
+                line_items: lineItems, // الآن lineItems تم تهيئتها بشكل صحيح
                 mode: 'payment',
-                line_items: lineItems,
-                metadata: { userId: userId.toString(), shippingAddressId: shippingAddressId.toString() },
-                success_url: 'http://localhost:8000/success',
-                cancel_url: 'http://localhost:8000/cancel',
+                success_url: `${req.protocol}://${req.get('host')}/api/orders/success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${req.protocol}://${req.get('host')}/cart/checkout`,
+                customer_email: userDoc.email,
+                metadata: {
+                    userId: userId.toString(),
+                    shippingAddressId: shippingAddressId.toString(),
+                    deliveryMethod: deliveryMethod,
+                    discountCode: cart.discountCode || ''
+                },
             });
 
             return res.json({ id: session.id, url: session.url, message: "Redirecting to payment gateway" });
         }
-
     } catch (err) {
         console.error("Checkout error:", err);
         return res.status(500).json({ message: "Server error during checkout process", error: err.message });
+    }
+};
+const handleStripeSuccess = async (req, res) => {
+    const sessionId = req.query.session_id;
+
+    try {
+        // 1. جلب تفاصيل الجلسة من Stripe
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        // 2. التحقق من حالة الدفع
+        if (session.payment_status !== 'paid') {
+            // يمكن إعادة توجيه المستخدم إلى صفحة 'الدفع فشل'
+            return res.redirect(`${process.env.CLIENT_URL}/payment-failed`);
+        }
+
+        // 3. منع التنفيذ المزدوج
+        // (يجب أن تتحقق مما إذا كان الطلب قد تم إنشاؤه بالفعل باستخدام sessionId أو OrderId مخزن في metadata)
+
+        // 4. استخلاص البيانات من metadata
+        const { userId, shippingAddressId, deliveryMethod } = session.metadata;
+
+        // 5. جلب السلة والعنوان والمستخدم (لإعادة بناء بيانات الطلب)
+        const userDoc = await User.findById(userId);
+        const shippingAddress = userDoc.addresses.id(shippingAddressId);
+        const cart = await Cart.findOne({ user: userId }).populate("items.product");
+
+        // 6. حساب الإجماليات مرة أخرى (للتأكد)
+        const governate = await Governate.findOne({ name: shippingAddress.governorate });
+        const totals = calculateCartTotals(cart, governate, deliveryMethod, cart.discountAmount || 0, cart.freeShipping || false);
+
+        // 7. إنشاء الطلب النهائي
+        const newOrder = await createFinalOrder(
+            userId,
+            userDoc,
+            shippingAddress,
+            totals,
+            'Online',
+            'Paid', // الحالة مدفوعة
+            cart
+        );
+
+        // 8. إنهاء العملية (تخفيض المخزون وتفريغ السلة)
+        await sendOrderConfirmationEmail(userDoc.email, userDoc.name, newOrder.orderNumber, newOrder.totalAmount);
+        await finalizeOrder(cart);
+
+        // 9. إعادة توجيه العميل إلى صفحة تأكيد الطلب
+        res.redirect(`${process.env.CLIENT_URL}/order-confirmation/${newOrder._id}`);
+
+    } catch (err) {
+        console.error("Stripe success handler error:", err);
+        res.redirect(`${process.env.CLIENT_URL}/payment-failed?error=server`);
     }
 };
 module.exports = {
@@ -917,5 +1042,6 @@ module.exports = {
     updateCartItem,
     removeCartItem,
     clearCart,
-    initiatePayment
+    initiatePayment,
+    handleStripeSuccess
 };

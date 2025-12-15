@@ -20,6 +20,7 @@ app.use(sessionMiddleware);
 const Governate = require('./models/governates');
 
 // Import routes
+const adminStatsRoutes = require('./routes/adminStats');
 const userRoutes = require('./routes/users');
 const productRoutes = require('./routes/products');
 const categoryRoutes = require('./routes/category');
@@ -42,7 +43,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/faq', faqRoutes);
 app.use('/api/cart', cartRoutes);
-
+app.use('/api/stats', adminStatsRoutes);
 // Test route
 app.get('/test-session', (req, res) => {
     if (!req.session.views) req.session.views = 0;

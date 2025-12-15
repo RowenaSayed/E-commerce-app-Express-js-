@@ -12,7 +12,7 @@ const OrderSchema = new Schema({
 
     // Link to User
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-
+    iscrearedByAdmin: { type: Boolean, default: false }, // FR-A16: Created by Admin flag
     // Items
     items: [
         {
@@ -37,6 +37,7 @@ const OrderSchema = new Schema({
     shippingAddress: {
         address: { type: String, required: true },
         city: { type: String, required: true },
+        governorate: { type: String, required: true },
         postalCode: String,
         country: { type: String, required: true },
         phone: { type: String, required: true }
