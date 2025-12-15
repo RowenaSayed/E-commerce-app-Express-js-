@@ -43,7 +43,7 @@ const OrderSchema = new Schema({
         phone: { type: String, required: true }
     },
 
-    status: { 
+    orderStatus: { 
         type: String, 
         enum: ['Order Placed', 'Payment Confirmed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled', 'Returned'], 
         default: 'Order Placed' 

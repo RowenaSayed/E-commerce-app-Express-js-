@@ -1,3 +1,4 @@
+// controllers/orders.js
 const Order = require('../models/orders');
 const Promotion = require('../models/promos');
 const Product = require('../models/products');
@@ -8,7 +9,7 @@ const { sendOrderStatusEmail } = require('../utilities/email');
 
 const calculateDeliveryDate = (governate, deliveryType = 'standard') => {
     const today = new Date();
-    let deliveryDays = governate.diliveryTime || 5; 
+    let deliveryDays = governate.deliveryTime || 5; 
 
     if (deliveryType === 'express') {
          deliveryDays = Math.max(1, deliveryDays - 1); // الشحن السريع يقلل يوم بحد أدنى يوم واحد
@@ -237,7 +238,7 @@ const createOrder = async (req, res) => {
                 totalAmount: newOrder.totalAmount,
                 estimatedDeliveryDate: newOrder.estimatedDeliveryDate,
                 paymentStatus: newOrder.paymentStatus,
-                status: newOrder.status,
+                status: newOrder.orderStatus,
                 discountApplied: discount > 0 ? discount : 0,
                 promoCode: promoApplied,
                 cartCleared: true
@@ -466,11 +467,11 @@ const cancelOrder = async (req, res) => {
         }
 
         // FR-O10: Cancel only before shipping
-        if (['Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(order.status)) {
+        if (['Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(order.orderStatus)) {
             return res.status(400).json({ message: "Cannot cancel order at this stage." });
         }
 
-        order.status = 'Cancelled';
+        order.orderStatus = 'Cancelled';
         order.isCancelled = true;
         order.cancellationReason = reason || 'Other';
         order.cancellationDate = Date.now();
@@ -506,7 +507,7 @@ const requestReturn = async (req, res) => {
         if (!order) return res.status(404).json({ message: "Order not found" });
         if (order.user.toString() !== userId.toString()) return res.status(403).json({ message: "Access denied" });
 
-        if (order.status !== 'Delivered') {
+        if (order.orderStatus !== 'Delivered') {
             return res.status(400).json({ message: "Cannot return an item that hasn't been delivered." });
         }
 
@@ -557,10 +558,10 @@ const updateOrderStatus = async (req, res) => {
         }
 
         // حفظ الحالة القديمة للمقارنة (مهم جداً لمنع تكرار استرجاع المخزون)
-        const oldStatus = order.status;
+        const oldStatus = order.orderStatus;
 
         // تحديث الحالة
-        if (status) order.status = status;
+        if (status) order.orderStatus = status;
 
         // FR-A17: إضافة أو تحديث الملاحظات الداخلية للأدمن
         if (internalNotes) {
@@ -576,6 +577,11 @@ const updateOrderStatus = async (req, res) => {
         if (status === 'Delivered') {
             order.actualDeliveryDate = Date.now();
             order.paymentStatus = 'Paid';
+            if (typeof sendOrderStatusEmail === 'function') {
+                 await sendOrderStatusEmail(
+                     order.user.email, order.user.name, order.orderNumber, status
+                 );
+            }
         }
 
         // FR-A19: استرجاع المخزون (Restock) تلقائياً عند الإلغاء أو الإرجاع
@@ -588,6 +594,11 @@ const updateOrderStatus = async (req, res) => {
                         sold: -item.quantity          // نقلل عداد المبيعات
                     }
                 });
+            }
+            if (typeof sendOrderStatusEmail === 'function') {
+                 await sendOrderStatusEmail(
+                     order.user.email, order.user.name, order.orderNumber, status
+                 );
             }
         }
 

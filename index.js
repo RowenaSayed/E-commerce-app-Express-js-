@@ -55,6 +55,8 @@ app.get('/test-session', (req, res) => {
 mongoose.connect(process.env.MONGO_URI)
     .then(async() => {
         console.log('MongoDB Connected successfully');
+       // await Governate.initializeGovernates();
+       // console.log('Governates initialized successfully or already exist.');
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         });
