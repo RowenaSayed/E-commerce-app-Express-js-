@@ -13,7 +13,8 @@ const {
     resetPassword,
     verifyEmail,
     toggleBanUser,
-    updateUser
+    updateUser,
+    reviewUserStatus
 } = require('../controllers/users');
 
 const { auth, authorize } = require('../middleware/auth');
@@ -39,6 +40,7 @@ router.put('/user/:id', auth, upload.single('profilePicture'), updateUserById);
 router.put('/profile',upload.single('profilePicture'), auth, updateUser); // المستخدم يحدث بياناته (بدون صورة بروفايل)
 router.put('/:id/toggle-ban', auth, authorize('admin'), toggleBanUser); // الأدمن يوقف/يفعل يوزر
 router.delete('/:id', auth, authorize('admin'), deleteUserById); // الأدمن يحذف
-
+// في routes/users.js
+router.put('/:id/review', auth, authorize('admin'), reviewUserStatus);
 
 module.exports = router;

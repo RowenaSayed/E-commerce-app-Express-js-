@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { sendResetPasswordEmail } = require('../utilities/email');
 const { sendWelcomeEmail } = require('../utilities/email');
+const { sendStatusUpdateEmail } = require('../utilities/email');
 const secret = process.env.JWT_SECRET;
 
 const sanitizeUser = (user) => {
@@ -84,9 +85,23 @@ const login = async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ message: 'Invalid password' });
 
-        if (!user.isEmailVerified) {
+                // داخل دالة login في controllers/users.js (بعد التأكد من كلمة المرور)
+        
+            if (!user.isEmailVerified) {
             return res.status(403).json({ message: 'Please verify your email address first.' });
         }
+        if (user.role !== 'buyer'&& user.role !=='admin') {
+    if (user.accountStatus === 'pending') {
+        return res.status(403).json({ 
+            message: 'Your account is pending admin approval. Only buyers can log in immediately.' 
+        });
+    }
+    if (user.accountStatus === 'rejected') {
+        return res.status(403).json({ 
+            message: 'Your staff/seller application has been rejected. Please contact administration.' 
+        });
+    }
+}
 
         if (user.twoFactorEnabled) {
             return res.status(200).json({
@@ -177,7 +192,7 @@ const updateUser = async (req, res) => {
 //updateUserById for admin to update any user
 const updateUserById = async (req, res) => {
     try {
-        const { password, role, ...updateData } = req.body;
+        const { accountStatus,role, ...updateData } = req.body;
         if (req.user.role !== 'admin') {
             return res.status(403).json({ message: 'Forbidden: Admins only' });
         }   
@@ -412,6 +427,33 @@ const toggleBanUser = async (req, res) => {
         res.status(500).json({ message: "Server Error" });
     }
 };
+// في controllers/users.js
+const reviewUserStatus = async (req, res) => {
+    try {
+        const { status } = req.body; // 'approved' or 'rejected'
+        const userId = req.params.id;
+
+        if (!['approved', 'rejected'].includes(status)) {
+            return res.status(400).json({ message: 'Invalid status' });
+        }
+
+        const user = await User.findByIdAndUpdate(
+            userId, 
+            { accountStatus: status }, 
+            { new: true }
+        );
+
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        // هنا يمكن إرسال إيميل للمستخدم لإبلاغه بالقرار
+        await sendStatusUpdateEmail(user.email, user.name, status);
+
+        res.json({ message: `User status updated to ${status}`, user:sanitizeUser(user) });
+    } catch (err) {
+        console.error("Error in reviewUserStatus:", err.message);
+        res.status(500).json({ message: "Server Error" });
+    }
+};
 
 module.exports = {
     createUser,
@@ -426,5 +468,6 @@ module.exports = {
     resetPassword,
     verifyEmail,
     toggleBanUser,
-    updateUser
+    updateUser,
+    reviewUserStatus
 };

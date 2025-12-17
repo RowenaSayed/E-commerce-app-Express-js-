@@ -64,6 +64,15 @@ const UserSchema = new Schema({
         enum: ['app', 'sms', 'email'], 
         default: 'email' 
     },
+    // أضيفي هذا الحقل داخل UserSchema في ملف models/users.js
+accountStatus: { 
+    type: String, 
+    enum: ['pending', 'approved', 'rejected'], 
+    default: function() {
+        // إذا كان المستخدم مشترٍ (buyer) يتم تفعيله تلقائياً، وإذا كان بائع أو سابورت ينتظر الموافقة
+        return (this.role === 'buyer') ? 'approved' : 'pending';
+    }
+},
     
     // السر الخاص بتطبيقات المصادقة (TOTP Secret)
     twoFactorSecret: String, 
