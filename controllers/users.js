@@ -165,13 +165,21 @@ const getUserById = async (req, res) => {
 // 4. Update User
 const updateUser = async (req, res) => {
     try {
-        const { password, role, ...updateData } = req.body;
-        const userId = req.user.id; 
+const { password, role, accountStatus, isBanned, ...updateData } = req.body;    
+        const userId = req.user.id;
+
+            if (password) {
+            const salt = await bcrypt.genSalt(10);
+            updateData.password = await bcrypt.hash(password, salt);
+        }
 
         if (req.file) {
             updateData.profilePicture = req.file.path;
         }
-
+        if (req.file) {
+            updateData.profilePicture = req.file.path;
+        }
+        
         const updatedUser = await User.findByIdAndUpdate(
             userId,
             updateData,
@@ -192,7 +200,7 @@ const updateUser = async (req, res) => {
 //updateUserById for admin to update any user
 const updateUserById = async (req, res) => {
     try {
-        const { accountStatus,role, ...updateData } = req.body;
+        const { password, ...updateData } = req.body;
         if (req.user.role !== 'admin') {
             return res.status(403).json({ message: 'Forbidden: Admins only' });
         }   
