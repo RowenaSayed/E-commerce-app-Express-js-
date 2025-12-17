@@ -211,17 +211,18 @@ const createOrder = async (req, res) => {
             shippingAddress: {
                 address: shippingAddress.address,
                 city: shippingAddress.city,
+                governorate: shippingAddress.governorate,
                 postalCode: shippingAddress.postalCode || "00000",
                 country: shippingAddress.country,
                 phone: shippingAddress.phone
             },
-            paymentMethod: paymentMethod,
-            paymentStatus: paymentStatus,
+            paymentMethod: paymentMethod, // 'COD' | 'Online'
+            paymentStatus: paymentMethod === 'Online' ? 'Paid' : 'Pending',
             totalAmount: totalAmount,
             VAT: VAT,
             deliveryFee: deliveryFee,
             discount: discount,
-            status: "Order Placed"
+            orderStatus: 'Order Placed'
         });
 
         await newOrder.save();
@@ -521,9 +522,9 @@ const requestReturn = async (req, res) => {
         }
 
         // FR-O15: Images required
-        if (!proofImages || proofImages.length === 0) {
-            return res.status(400).json({ message: "Proof images are required." });
-        }
+        // if (!proofImages || proofImages.length === 0) {
+        //     return res.status(400).json({ message: "Proof images are required." });
+        // }
 
         order.isReturnRequested = true;
         order.returnDetails = {
@@ -578,9 +579,9 @@ const updateOrderStatus = async (req, res) => {
             order.actualDeliveryDate = Date.now();
             order.paymentStatus = 'Paid';
             if (typeof sendOrderStatusEmail === 'function') {
-                 await sendOrderStatusEmail(
-                     order.user.email, order.user.name, order.orderNumber, status
-                 );
+                    await sendOrderStatusEmail(
+                        order.user.email, order.user.name, order.orderNumber, status
+                    );
             }
         }
 
@@ -647,6 +648,24 @@ const deleteOrder = async (req, res) => {
     }
 };
 
+const getUserReturnRequests = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+        const ordersWithReturn = await Order.find({ 
+        user: userId,
+        isReturnRequested: true
+        })
+        .select('orderNumber returnDetails items') 
+        .populate('items.product', 'name images price');
+
+        res.status(200).json({ count: ordersWithReturn.length, orders: ordersWithReturn });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error', error: err.message });
+    }
+};
+
 module.exports = {
     createOrder,
     getOrders,
@@ -655,5 +674,6 @@ module.exports = {
     requestReturn,
     updateOrderStatus,
     deleteOrder,
-    adminCreateOrder
+    adminCreateOrder,
+    getUserReturnRequests
 };

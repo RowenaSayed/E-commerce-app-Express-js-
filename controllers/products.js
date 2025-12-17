@@ -338,7 +338,7 @@ const getProducts = async (req, res) => {
     try {
         const {
             category, condition, minPrice, maxPrice, brand,
-            search, lowStock, showArchived, sort,
+            search, lowStock, showArchived, sort,cpu,gpu,ram,storage,
             page = 1, limit = 20, seller, featured
         } = req.query;
 
@@ -354,6 +354,10 @@ const getProducts = async (req, res) => {
         if (category) filter.category = category;
         if (condition) filter.condition = condition;
         if (brand) filter.brand = brand;
+        if (cpu) filter['technicalSpecs.CPU'] = cpu;
+        if (gpu) filter['technicalSpecs.GPU'] = gpu;
+        if (ram) filter['technicalSpecs.RAM'] = ram;
+        if (storage) filter['technicalSpecs.Storage'] = storage;
         if (seller) filter.seller = seller;
         if (featured === 'true') filter.isFeatured = true;
 

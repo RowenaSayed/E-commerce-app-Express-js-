@@ -8,7 +8,8 @@ const {
     cancelOrder, 
     requestReturn, 
     deleteOrder ,
-    adminCreateOrder
+    adminCreateOrder,
+    getUserReturnRequests
 } = require('../controllers/orders');
 const { auth, authorize } = require('../middleware/auth');
 
@@ -18,6 +19,7 @@ router.post('/admin', auth, authorize('admin', 'support'),adminCreateOrder); // 
 // 2. View Orders (History)
 router.get('/', auth, getOrders);
 
+router.get('/return', auth, getUserReturnRequests);
 // 3. View Specific Order
 router.get('/:id', auth, getOrderById);
 
@@ -32,5 +34,6 @@ router.put('/:id', auth, authorize('admin', 'support'), updateOrderStatus);
 
 // 7. Delete Order (Admin)
 router.delete('/:id/delete', auth, authorize('admin'), deleteOrder);
+
 
 module.exports = router;

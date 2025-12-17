@@ -61,12 +61,13 @@ const createReview = async (req, res) => {
 // 2. Get All Reviews (Public) - زي ما هي
 const getAllReviews = async (req, res) => {
     try {
-        const { product, rating, condition, sort, verified } = req.query;
+        const { product, rating, condition, sort, verified,user } = req.query;
         const filterObj = {};
 
         if (product) filterObj.product = product;
         if (rating) filterObj.rating = rating;
         if (condition) filterObj.productCondition = condition;
+        if(user) filterObj.user=user
         if (verified === 'true') filterObj.verifiedPurchase = true;
 
         let sortStr = '-createdAt';

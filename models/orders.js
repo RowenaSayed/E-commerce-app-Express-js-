@@ -66,7 +66,7 @@ internalNotes: { type: String }, // FR-A17: ملاحظات للأدمن فقط
         comment: String,
         proofImages: [String],
         requestDate: Date,
-        status: { type: String, enum: ['None', 'Return Requested', 'Return Approved', 'Return Rejected', 'Item Picked Up', 'Item Received', 'Quality Check', 'Refund Processed'], default: 'None' }
+        status: { type: String, enum: ['Return Requested', 'Return Approved', 'Return Rejected', 'Refund Processed'], default: 'Return Requested' }
     }
 }, { timestamps: true });
 
