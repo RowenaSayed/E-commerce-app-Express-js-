@@ -3,54 +3,46 @@ const Product = require('../models/products');
 const Governate = require('../models/governates');
 const User = require('../models/users');
 const Promotion = require('../models/promos');
-const Order = require('../models/orders'); // 🚀 مودل الطلبات
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY); // 🚀 تهيئة Stripe
-const { createFinalOrder, finalizeOrder } = require('../utilities/orderCreation'); // 🚀 يجب إنشاء هذا الملف
-const { sendOrderConfirmationEmail } = require('../utilities/email'); // 🚀 دالة الإيميل
+const Order = require('../models/orders');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const { createFinalOrder, finalizeOrder } = require('../utilities/orderCreation');
+const { sendOrderConfirmationEmail } = require('../utilities/email');
 
-// 🚀 Helper function to calculate cart totals (مُعدَّلة لتقبل الخصومات والشحن المجاني)
+// Helper function to calculate delivery fee consistently
+const calculateDeliveryFee = (governate, deliveryMethod = 'standard', freeShipping = false) => {
+    if (freeShipping) return 0;
+
+    let fee = governate?.fee || 0;
+    if (deliveryMethod === 'express') {
+        fee = Math.round(fee * 1.5);
+    }
+    return fee;
+};
+
 const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', discountAmount = 0, freeShipping = false) => {
     let subtotal = 0;
-    let itemsTotal = 0;
-    // 1. حساب الإجمالي الفرعي قبل الخصم
     cart.items.forEach(item => {
         if (item.product && item.product.price) {
             subtotal += item.product.price * item.quantity;
         }
     });
 
-    // 2. حساب رسوم الشحن
-    let deliveryFee = governate?.fee || 0;
-    if (deliveryMethod === 'express') {
-        deliveryFee = Math.round(deliveryFee * 1.5);
-    }
+    // Cap discount at subtotal
+    discountAmount = Math.min(discountAmount, subtotal);
+    const discountedSubtotal = subtotal - discountAmount;
 
-    // 3. تطبيق الشحن المجاني
-    if (freeShipping) {
-        deliveryFee = 0;
-    }
+    // Calculate delivery fee using helper
+    const deliveryFee = calculateDeliveryFee(governate, deliveryMethod, freeShipping);
 
-    // 4. تطبيق الخصم
-    let finalDiscount = Math.min(discountAmount, subtotal);
-    let finalSubtotal = subtotal - discountAmount;
-    if (finalSubtotal < 0) finalSubtotal = 0;
-
-    // 5. حساب VAT (بعد الخصم)
+    // VAT only on products (not shipping)
     const vatRate = 0.14;
-    const vat = finalSubtotal * vatRate;
+    const vat = discountedSubtotal * vatRate;
 
-
-    // 5. تطبيق الشحن المجاني
-    if (freeShipping) {
-        deliveryFee = 0;
-    }
-
-    // 6. الإجمالي النهائي
-    const total = finalSubtotal + deliveryFee + vat;
+    const total = discountedSubtotal + deliveryFee + vat;
 
     return {
         subtotal: subtotal,
-        finalSubtotal: finalSubtotal,
+        finalSubtotal: discountedSubtotal,
         deliveryFee,
         vat,
         total,
@@ -58,12 +50,11 @@ const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', disco
         vatRate: vatRate
     };
 };
-// Helper to calculate estimated delivery date
+
 const calculateDeliveryDate = (governate, deliveryMethod = 'standard') => {
     const today = new Date();
     let deliveryDays = governate?.deliveryTime || 3;
 
-    // Express delivery reduces time by 1 day (minimum 1 day)
     if (deliveryMethod === 'express') {
         deliveryDays = Math.max(1, deliveryDays - 1);
     }
@@ -71,15 +62,13 @@ const calculateDeliveryDate = (governate, deliveryMethod = 'standard') => {
     const deliveryDate = new Date(today);
     deliveryDate.setDate(today.getDate() + deliveryDays);
 
-    // Skip weekends (optional)
     while (deliveryDate.getDay() === 0 || deliveryDate.getDay() === 6) {
         deliveryDate.setDate(deliveryDate.getDate() + 1);
     }
 
-    return deliveryDate.toISOString().split('T')[0]; // Return as YYYY-MM-DD
+    return deliveryDate.toISOString().split('T')[0];
 };
 
-// Helper to validate and apply promotion
 const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
     const promo = await Promotion.findOne({
         code: promotionCode.toUpperCase(),
@@ -95,7 +84,21 @@ const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
         return { valid: false, message: "Promotion expired" };
     }
 
-    // حساب subtotal الحقيقي من الكارت
+    // Check if promo is limited to specific products/categories
+    if (promo.applicableProducts && promo.applicableProducts.length > 0) {
+        const cartProductIds = cart.items.map(item => item.product._id.toString());
+        const hasApplicableProduct = cartProductIds.some(productId =>
+            promo.applicableProducts.includes(productId)
+        );
+
+        if (!hasApplicableProduct) {
+            return {
+                valid: false,
+                message: "Promotion not applicable to items in cart"
+            };
+        }
+    }
+
     const cartSubtotal = cart.items.reduce((sum, item) => {
         return sum + item.product.price * item.quantity;
     }, 0);
@@ -107,12 +110,34 @@ const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
         };
     }
 
+    // Check usage limits
+    if (promo.usageLimitPerUser && userId) {
+        const userUsage = promo.usedBy?.find(u => u.user.toString() === userId);
+        if (userUsage && userUsage.count >= promo.usageLimitPerUser) {
+            return {
+                valid: false,
+                message: "Usage limit reached for this promotion"
+            };
+        }
+    }
+
+    // Check one-time use
+    if (promo.oneTimeUse && promo.usedBy?.some(u => u.user.toString() === userId)) {
+        return {
+            valid: false,
+            message: "Promotion already used"
+        };
+    }
+
     let discount = 0;
     let freeShipping = false;
 
-    // ⭐ المنطق الصح هنا
     if (promo.type === 'Percentage') {
         discount = cartSubtotal * (promo.value / 100);
+        // Cap percentage discount if maxDiscount is set
+        if (promo.maxDiscount) {
+            discount = Math.min(discount, promo.maxDiscount);
+        }
     }
     else if (promo.type === 'Fixed') {
         discount = Math.min(promo.value, cartSubtotal);
@@ -133,7 +158,6 @@ const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
 
 const getCart = async (req, res) => {
     try {
-        console.log(req.sessionID);
         const query = {
             $or: [
                 req.user ? { user: req.user.id } : null,
@@ -148,75 +172,78 @@ const getCart = async (req, res) => {
         let itemsWereRemoved = false;
         let quantitiesWereAdjusted = false;
 
-        // 🚀 البدء في منطق التنظيف الذكي للسلة
         const updatedItems = cart.items.filter(item => {
             const product = item.product;
 
-            // 1. التحقق من وجود المنتج وكمية المخزون
             if (!product || product.stockQuantity <= 0) {
                 itemsWereRemoved = true;
-                return false; // إزالة العنصر بالكامل (نفد المخزون)
+                return false;
             }
 
-            // 2. التحقق من تجاوز الكمية المطلوبة للمخزون
             if (item.quantity > product.stockQuantity) {
-                item.quantity = product.stockQuantity; // ضبط الكمية لتساوي المخزون المتوفر
+                item.quantity = product.stockQuantity;
                 quantitiesWereAdjusted = true;
             }
 
-            return true; // إبقاء العنصر
+            return true;
         });
 
-        // 3. تحديث وحفظ السلة إذا حدثت أي تعديلات
         if (itemsWereRemoved || quantitiesWereAdjusted) {
             cart.items = updatedItems;
 
-            // إعادة تعيين أي خصم مطبق، حيث أن محتوى السلة قد تغير الآن
-            cart.discountCode = undefined;
-            cart.discountAmount = undefined;
-            cart.freeShipping = undefined;
+            // Revalidate promotion if cart changed
+            if (cart.discountCode) {
+                const revalidation = await validateAndApplyPromotion(
+                    cart.discountCode,
+                    cart,
+                    req.user?.id
+                );
 
+                if (!revalidation.valid) {
+                    cart.discountCode = undefined;
+                    cart.discountAmount = undefined;
+                    cart.freeShipping = undefined;
+                } else {
+                    // Update discount based on new cart value
+                    cart.discountAmount = revalidation.discount;
+                    cart.freeShipping = revalidation.freeShipping;
+                }
+            }
             await cart.save();
         } else {
-            await cart.save(); // حفظ عادي لأي تحديثات أخرى
+            await cart.save();
         }
 
-        // 4. حساب الإجماليات
         let totals = {
             subtotal: 0,
             deliveryFee: 0,
             vat: 0,
             total: 0,
-            discount: cart.discountAmount || 0, // استخدام الخصم المُعاد تعيينه (عادة 0)
+            discount: cart.discountAmount || 0,
             discountCode: cart.discountCode || null,
             vatRate: 14
         };
 
         if (cart.items.length > 0) {
-            // Basic subtotal calculation
             cart.items.forEach(item => {
                 if (item.product && item.product.price) {
                     totals.subtotal += item.product.price * item.quantity;
                 }
             });
 
-            // Apply discount if exists (هذا المنطق سيعمل الآن بقيمة الخصم الجديدة بعد التنظيف)
             let finalSubtotal = totals.subtotal - totals.discount;
             if (finalSubtotal < 0) finalSubtotal = 0;
 
-            // Calculate VAT (14%)
             totals.vat = finalSubtotal * 0.14;
             totals.total = finalSubtotal + totals.vat;
         }
 
-        // 5. إرجاع رسالة تنبيه للمستخدم
         let message = "Cart retrieved successfully.";
         if (itemsWereRemoved) {
             message = "Some items were automatically removed due to insufficient stock.";
         } else if (quantitiesWereAdjusted) {
             message = "Quantity of some items was reduced to match available stock.";
         }
-
 
         res.json({
             cart,
@@ -232,8 +259,6 @@ const getCart = async (req, res) => {
 
 const getCartSummary = async (req, res) => {
     try {
-        const { governateId, deliveryMethod = 'standard', discountCode } = req.query;
-
         const query = {
             $or: [
                 req.user ? { user: req.user.id } : null,
@@ -246,87 +271,206 @@ const getCartSummary = async (req, res) => {
         if (!cart || cart.items.length === 0) {
             return res.json({
                 subtotal: 0,
-                deliveryFee: 0,
-                vat: 0,
-                total: 0,
-                estimatedDelivery: null,
                 discount: 0,
                 discountCode: null,
-                freeShipping: false
+                freeShipping: false,
+                message: "Cart is empty"
             });
         }
 
-        let governate = null;
-        if (governateId) {
-            governate = await Governate.findById(governateId);
-        } else if (req.user) {
-            const user = await User.findById(req.user.id);
-            if (user && user.addresses && user.addresses.length > 0) {
-                const defaultAddress = user.addresses.find(addr => addr.isDefault) || user.addresses[0];
-                if (defaultAddress && defaultAddress.governorate) {
-                    governate = await Governate.findOne({ name: defaultAddress.governorate });
-                }
-            }
-        }
+        const subtotal = cart.items.reduce((sum, item) => {
+            return sum + (item.product.price * item.quantity);
+        }, 0);
 
-        let discount = cart.discountAmount || 0;
-        let appliedPromotionCode = cart.discountCode;
-        let freeShipping = false;
-
-        if (discountCode && (!appliedPromotionCode || appliedPromotionCode !== discountCode)) {
-            const validation = await validateAndApplyPromotion(
-                discountCode,
-                cart,
-                req.user?.id
-            );
-
-            if (validation.valid) {
-                discount = validation.discount;
-                freeShipping = validation.freeShipping;
-                appliedPromotionCode = discountCode;
-
-                cart.discountCode = discountCode;
-                cart.discountAmount = discount;
-                cart.freeShipping = freeShipping;
-                await cart.save();
-            }
-        }
-
-        const totals = calculateCartTotals(cart, governate, deliveryMethod);
-
-        let estimatedDelivery = null;
-        if (governate) {
-            estimatedDelivery = calculateDeliveryDate(governate, deliveryMethod);
-        }
-
-        if (discount > 0) {
-            totals.subtotal -= discount;
-            if (totals.subtotal < 0) totals.subtotal = 0;
-            totals.vat = totals.subtotal * 0.14;
-            totals.total = totals.subtotal + totals.deliveryFee + totals.vat;
-            totals.discount = discount;
-            totals.discountCode = appliedPromotionCode;
-        }
-
-        // Apply free shipping
-        if (freeShipping) {
-            totals.deliveryFee = 0;
-            totals.total = totals.subtotal + totals.vat;
-        }
+        const discount = cart.discountAmount || 0;
+        const finalSubtotal = Math.max(0, subtotal - discount);
 
         res.json({
-            ...totals,
-            estimatedDelivery,
-            deliveryMethod,
-            freeShipping,
-            governate: governate ? {
-                name: governate.name,
-                fee: governate.fee,
-                deliveryTime: governate.deliveryTime
-            } : null
+            subtotal,
+            discount,
+            finalSubtotal,
+            discountCode: cart.discountCode,
+            freeShipping: cart.freeShipping || false,
+            itemCount: cart.items.length,
+            items: cart.items.map(item => ({
+                product: item.product.name,
+                price: item.product.price,
+                quantity: item.quantity,
+                total: item.product.price * item.quantity
+            }))
         });
 
     } catch (err) {
+        console.error("getCartSummary Error:", err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+const calculateShipping = async (req, res) => {
+    try {
+        const { governateId, deliveryMethod = 'standard' } = req.body;
+
+        if (!governateId) {
+            return res.status(400).json({ message: "Governate ID is required" });
+        }
+
+        const query = {
+            $or: [
+                req.user ? { user: req.user.id } : null,
+                { sessionId: req.sessionID }
+            ].filter(Boolean)
+        };
+
+        const cart = await Cart.findOne(query).populate("items.product");
+
+        if (!cart || cart.items.length === 0) {
+            return res.status(400).json({ message: "Cart is empty" });
+        }
+
+        const governate = await Governate.findById(governateId);
+        if (!governate) {
+            return res.status(404).json({ message: "Governate not found" });
+        }
+
+        const subtotal = cart.items.reduce((sum, item) => {
+            return sum + (item.product.price * item.quantity);
+        }, 0);
+
+        const discount = cart.discountAmount || 0;
+        const finalSubtotal = Math.max(0, subtotal - discount);
+
+        // Use the same helper function for consistency
+        const deliveryFee = calculateDeliveryFee(governate, deliveryMethod, cart.freeShipping || false);
+
+        const vatRate = 0.14;
+        const vat = finalSubtotal * vatRate;
+        const total = finalSubtotal + deliveryFee + vat;
+        const estimatedDelivery = calculateDeliveryDate(governate, deliveryMethod);
+
+        cart.shippingInfo = {
+            governateId,
+            governateName: governate.name,
+            deliveryMethod,
+            deliveryFee,
+            estimatedDelivery
+        };
+        await cart.save();
+
+        res.json({
+            subtotal,
+            discount,
+            finalSubtotal,
+            deliveryFee,
+            vat,
+            total,
+            estimatedDelivery,
+            deliveryMethod,
+            governate: {
+                name: governate.name,
+                fee: governate.fee,
+                deliveryTime: governate.deliveryTime
+            },
+            shippingInfo: cart.shippingInfo
+        });
+
+    } catch (err) {
+        console.error("calculateShipping Error:", err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+const getCompleteInvoice = async (req, res) => {
+    try {
+        const query = {
+            $or: [
+                req.user ? { user: req.user.id } : null,
+                { sessionId: req.sessionID }
+            ].filter(Boolean)
+        };
+
+        const cart = await Cart.findOne(query).populate("items.product");
+
+        if (!cart || cart.items.length === 0) {
+            return res.status(400).json({ message: "Cart is empty" });
+        }
+
+        if (!cart.shippingInfo || !cart.shippingInfo.governateId) {
+            return res.status(400).json({
+                message: "Shipping address is required",
+                requiresAddress: true,
+                step: "shipping"
+            });
+        }
+
+        const governate = await Governate.findById(cart.shippingInfo.governateId);
+        if (!governate) {
+            return res.status(404).json({ message: "Governate not found" });
+        }
+
+        const subtotal = cart.items.reduce((sum, item) => {
+            return sum + (item.product.price * item.quantity);
+        }, 0);
+
+        const discount = cart.discountAmount || 0;
+        const finalSubtotal = Math.max(0, subtotal - discount);
+
+        // Use helper function for consistency
+        const deliveryFee = calculateDeliveryFee(
+            governate,
+            cart.shippingInfo.deliveryMethod,
+            cart.freeShipping || false
+        );
+
+        const vatRate = 0.14;
+        const vat = finalSubtotal * vatRate;
+        const total = finalSubtotal + deliveryFee + vat;
+
+        res.json({
+            items: cart.items.map(item => ({
+                product: {
+                    id: item.product._id,
+                    name: item.product.name,
+                    price: item.product.price,
+                    image: item.product.images?.[0]
+                },
+                quantity: item.quantity,
+                total: item.product.price * item.quantity
+            })),
+            pricing: {
+                subtotal,
+                discount: {
+                    amount: discount,
+                    code: cart.discountCode,
+                    type: cart.promotionType
+                },
+                finalSubtotal,
+                shipping: {
+                    fee: deliveryFee,
+                    method: cart.shippingInfo.deliveryMethod,
+                    isFree: cart.freeShipping || false
+                },
+                tax: {
+                    rate: vatRate * 100,
+                    amount: vat
+                },
+                total
+            },
+            shipping: {
+                governate: {
+                    name: governate.name,
+                    deliveryTime: governate.deliveryTime
+                },
+                estimatedDelivery: cart.shippingInfo.estimatedDelivery,
+                method: cart.shippingInfo.deliveryMethod
+            },
+            totals: {
+                items: cart.items.length,
+                quantity: cart.items.reduce((sum, item) => sum + item.quantity, 0)
+            }
+        });
+
+    } catch (err) {
+        console.error("getCompleteInvoice Error:", err);
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -339,7 +483,6 @@ const getShippingOptions = async (req, res) => {
         if (governateId) {
             governate = await Governate.findById(governateId);
         } else if (req.user) {
-            // Check user's addresses for governorate
             const user = await User.findById(req.user.id);
             if (user && user.addresses && user.addresses.length > 0) {
                 const defaultAddress = user.addresses.find(addr => addr.isDefault) || user.addresses[0];
@@ -350,7 +493,6 @@ const getShippingOptions = async (req, res) => {
         }
 
         if (!governate) {
-            // Return default options if no governate
             return res.json({
                 standard: {
                     name: 'Standard Delivery',
@@ -406,7 +548,6 @@ const getSavedAddresses = async (req, res) => {
             });
         }
 
-        // Find default address
         const defaultAddress = user.addresses.find(addr => addr.isDefault);
 
         res.json({
@@ -435,7 +576,6 @@ const addNewAddress = async (req, res) => {
             isDefault = false
         } = req.body;
 
-        // Validate required fields based on your AddressSchema
         if (!label || !['Home', 'Work', 'Other'].includes(label)) {
             return res.status(400).json({
                 message: "Valid label is required (Home, Work, or Other)"
@@ -448,7 +588,6 @@ const addNewAddress = async (req, res) => {
             });
         }
 
-        // Verify governate exists in database
         const governateInfo = await Governate.findOne({ name: governorate });
         if (!governateInfo) {
             return res.status(400).json({
@@ -459,7 +598,6 @@ const addNewAddress = async (req, res) => {
 
         const user = await User.findById(req.user.id);
 
-        // Create new address object matching your schema
         const newAddress = {
             label,
             street,
@@ -469,7 +607,6 @@ const addNewAddress = async (req, res) => {
             isDefault
         };
 
-        // If this is default, unset other defaults
         if (isDefault && user.addresses.length > 0) {
             user.addresses.forEach(addr => {
                 addr.isDefault = false;
@@ -503,7 +640,6 @@ const updateAddress = async (req, res) => {
             return res.status(400).json({ message: "Address ID is required" });
         }
 
-        // Validate governorate if being updated
         if (updates.governorate) {
             const governateInfo = await Governate.findOne({ name: updates.governorate });
             if (!governateInfo) {
@@ -515,21 +651,18 @@ const updateAddress = async (req, res) => {
 
         const user = await User.findById(req.user.id);
 
-        // Find the address index
         const addressIndex = user.addresses.findIndex(addr => addr._id.toString() === addressId);
 
         if (addressIndex === -1) {
             return res.status(404).json({ message: "Address not found" });
         }
 
-        // If setting as default, unset other defaults
         if (updates.isDefault === true) {
             user.addresses.forEach(addr => {
                 addr.isDefault = false;
             });
         }
 
-        // Update the address
         user.addresses[addressIndex] = {
             ...user.addresses[addressIndex].toObject(),
             ...updates
@@ -561,7 +694,6 @@ const deleteAddress = async (req, res) => {
 
         const user = await User.findById(req.user.id);
 
-        // Filter out the address to delete
         const initialLength = user.addresses.length;
         user.addresses = user.addresses.filter(addr => addr._id.toString() !== addressId);
 
@@ -602,7 +734,6 @@ const applyPromotionCode = async (req, res) => {
             return res.status(400).json({ message: "Cart is empty" });
         }
 
-        // Validate promotion
         const validation = await validateAndApplyPromotion(
             promotionCode,
             cart,
@@ -615,41 +746,39 @@ const applyPromotionCode = async (req, res) => {
             });
         }
 
-        // Save promotion to cart
+        // Track promotion usage
+        if (req.user?.id && validation.promotion) {
+            validation.promotion.usedBy = validation.promotion.usedBy || [];
+            const userIndex = validation.promotion.usedBy.findIndex(
+                u => u.user.toString() === req.user.id
+            );
+
+            if (userIndex > -1) {
+                validation.promotion.usedBy[userIndex].count += 1;
+                validation.promotion.usedBy[userIndex].lastUsed = new Date();
+            } else {
+                validation.promotion.usedBy.push({
+                    user: req.user.id,
+                    count: 1,
+                    firstUsed: new Date(),
+                    lastUsed: new Date()
+                });
+            }
+            validation.promotion.usedCount += 1;
+            await validation.promotion.save();
+        }
+
         cart.discountCode = promotionCode;
         cart.discountAmount = validation.discount;
         cart.freeShipping = validation.freeShipping;
         cart.promotionType = validation.promotion.type;
         await cart.save();
 
+        const subtotal = cart.items.reduce((sum, item) => {
+            return sum + (item.product.price * item.quantity);
+        }, 0);
 
-        // Get governate for calculation (if available)
-        let governate = null;
-        if (req.query.governateId) {
-            governate = await Governate.findById(req.query.governateId);
-        }
-
-        const deliveryMethod = req.query.deliveryMethod || 'standard';
-
-        // Recalculate totals
-        const totals = calculateCartTotals(cart, governate, deliveryMethod);
-
-        // Apply promotion
-        totals.subtotal -= validation.discount;
-        if (totals.subtotal < 0) totals.subtotal = 0;
-        totals.vat = totals.subtotal * 0.14;
-
-        // Apply free shipping if applicable
-        if (validation.freeShipping) {
-            totals.deliveryFee = 0;
-        }
-
-        totals.total = totals.subtotal + totals.deliveryFee + totals.vat;
-        totals.discount = validation.discount;
-        totals.discountCode = promotionCode;
-        totals.freeShipping = validation.freeShipping;
-        totals.promotionType = validation.promotion.type;
-        totals.promotionDescription = validation.description;
+        const finalSubtotal = Math.max(0, subtotal - validation.discount);
 
         res.json({
             message: "Promotion applied successfully",
@@ -657,12 +786,21 @@ const applyPromotionCode = async (req, res) => {
                 code: promotionCode,
                 type: validation.promotion.type,
                 value: validation.promotion.value,
-                description: validation.description
+                description: validation.description,
+                maxDiscount: validation.promotion.maxDiscount,
+                minPurchase: validation.promotion.minPurchase
             },
-            ...totals
+            cartSummary: {
+                subtotal,
+                discount: validation.discount,
+                finalSubtotal,
+                freeShipping: validation.freeShipping,
+                discountCode: promotionCode
+            }
         });
 
     } catch (err) {
+        console.error("applyPromotionCode Error:", err);
         res.status(500).json({ message: "Server error" });
     }
 };
@@ -704,7 +842,6 @@ const removePromotionCode = async (req, res) => {
     }
 };
 
-// Existing cart operations (unchanged)
 const addToCart = async (req, res) => {
     try {
         const { product_id, quantity } = req.body;
@@ -714,7 +851,7 @@ const addToCart = async (req, res) => {
         const product = await Product.findById(product_id);
         if (!product) return res.status(404).json({ message: 'Product not found' });
         if (product.stockQuantity < qty) return res.status(400).json({ message: 'Not enough stock' });
-        console.log(req.sessionID);
+
         const query = req.user?.id ? { user: req.user.id } : { sessionId: req.sessionID };
         let cart = await Cart.findOne(query);
 
@@ -758,7 +895,6 @@ const updateCartItem = async (req, res) => {
 
         const product = await Product.findById(cartItem.product);
         if (!product) {
-            // Remove item if product no longer exists
             cartItem.remove();
             await cart.save();
             return res.status(404).json({ message: 'Product no longer available, removed from cart' });
@@ -819,6 +955,7 @@ const clearCart = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
 const initiatePayment = async (req, res) => {
     try {
         const userId = req.user?.id;
@@ -837,21 +974,25 @@ const initiatePayment = async (req, res) => {
             return res.status(400).json({ message: "Cart is empty." });
         }
 
-        // 1. جلب العنوان والمستخدم
         const userDoc = await User.findById(userId);
-        const shippingAddress = userDoc.addresses.id(shippingAddressId);
+        const shippingAddress = userDoc.addresses.find(
+            addr => addr._id.toString() === shippingAddressId
+        );
+
+        if (!shippingAddress) {
+            return res.status(400).json({
+                message: "Shipping address not found or doesn't belong to user"
+            });
+        }
         if (!shippingAddress) return res.status(400).json({ message: "Valid shipping address ID required." });
 
-        // 2. حساب الإجماليات النهائية
         const governate = await Governate.findOne({ name: shippingAddress.governorate });
 
-        // 🛑 تمرير جميع معلمات الخصم والشحن
         const totals = calculateCartTotals(
             cart, governate, deliveryMethod,
             cart.discountAmount || 0, cart.freeShipping || false
         );
 
-        // 3. التحقق من المخزون النهائي (يتم هذا التحقق أيضاً في createFinalOrder)
         for (const item of cart.items) {
             const product = await Product.findById(item.product._id);
             if (!product || product.stockQuantity < item.quantity) {
@@ -859,17 +1000,9 @@ const initiatePayment = async (req, res) => {
             }
         }
 
-        // ==========================================================
-        // 4. منطق الدفع (COD/Stripe)
-        // ==========================================================
-
         if (paymentMethod === 'COD') {
-            // 4.1. Cash on Delivery
-
-            // إنشاء الطلب مباشرة (FR-C18 & FR-C20)
             const newOrder = await createFinalOrder(userId, userDoc, shippingAddress, totals, 'COD', 'Pending', cart);
 
-            // FR-C19: إرسال التأكيد وتخفيض المخزون وتفريغ السلة
             await sendOrderConfirmationEmail(userDoc.email, userDoc.name, newOrder.orderNumber, newOrder.totalAmount);
             await finalizeOrder(cart);
 
@@ -879,53 +1012,49 @@ const initiatePayment = async (req, res) => {
             });
 
         } else if (paymentMethod === 'Online') {
-            // 4.2. Stripe/Online Payment Gateway
-
+            // Calculate discounted price per item
             const lineItems = cart.items.map(item => {
-                // سعر الوحدة قبل الخصم والضريبة
-                const unitPrice = item.product.price;
+                const originalItemTotal = item.product.price * item.quantity;
+                const discountRatio = totals.discount > 0 ? (totals.discount / totals.subtotal) : 0;
+                const itemDiscount = originalItemTotal * discountRatio;
+                const discountedItemTotal = originalItemTotal - itemDiscount;
 
-                // ⚠️ يجب أن يتم تطبيق الخصم والـ VAT على كل صنف هنا بشكل أكثر تعقيداً
-                // ولكن للتبسيط وتجنب تعقيدات (منطق الخصم الموزع)، سنعتمد على الإجمالي النهائي
+                // Calculate VAT for this item
+                const itemVAT = discountedItemTotal * 0.14;
 
-                // نسبة مساهمة المنتج في الإجمالي الفرعي (قبل الخصم)
-                const productRatio = (unitPrice * item.quantity) / totals.subtotal;
-
-                // حصة المنتج من finalSubtotal (بعد الخصم)
-                const discountedProductPrice = (totals.finalSubtotal * productRatio) / item.quantity;
-
-                // حصة المنتج من VAT
-                const productVAT = (totals.vat * productRatio) / item.quantity;
-
-                // السعر النهائي للوحدة شامل الضريبة (بعد الخصم)
-                const finalUnitPrice = discountedProductPrice + productVAT;
+                // Calculate final price per unit
+                const finalUnitPrice = (discountedItemTotal + itemVAT) / item.quantity;
 
                 return {
                     price_data: {
                         currency: 'egp',
-                        product_data: { name: item.product.name },
-                        // يجب أن يكون المبلغ بالوحدات الصغرى (قروش)، لذا نضرب في 100
+                        product_data: {
+                            name: item.product.name,
+                            images: item.product.images ? [item.product.images[0]] : []
+                        },
                         unit_amount: Math.round(finalUnitPrice * 100),
                     },
                     quantity: item.quantity,
                 };
             });
 
-            // ... (إعداد Line Items للمنتجات)
-
-
-            // إضافة الشحن
             if (totals.deliveryFee > 0) {
                 lineItems.push({
-                    price_data: { currency: 'egp', product_data: { name: 'Shipping Fee' }, unit_amount: Math.round(totals.deliveryFee * 100) },
+                    price_data: {
+                        currency: 'egp',
+                        product_data: {
+                            name: 'Shipping Fee',
+                            description: `${deliveryMethod === 'express' ? 'Express Delivery' : 'Standard Delivery'}`
+                        },
+                        unit_amount: Math.round(totals.deliveryFee * 100)
+                    },
                     quantity: 1
                 });
             }
 
             const session = await stripe.checkout.sessions.create({
-                // ... (إعداد جلسة Stripe)
                 payment_method_types: ['card'],
-                line_items: lineItems, // الآن lineItems تم تهيئتها بشكل صحيح
+                line_items: lineItems,
                 mode: 'payment',
                 success_url: `${req.protocol}://${req.get('host')}/api/orders/success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${req.protocol}://${req.get('host')}/cart/checkout`,
@@ -934,7 +1063,9 @@ const initiatePayment = async (req, res) => {
                     userId: userId.toString(),
                     shippingAddressId: shippingAddressId.toString(),
                     deliveryMethod: deliveryMethod,
-                    discountCode: cart.discountCode || ''
+                    discountCode: cart.discountCode || '',
+                    discountAmount: cart.discountAmount || 0,
+                    freeShipping: cart.freeShipping || false
                 },
             });
 
@@ -945,50 +1076,47 @@ const initiatePayment = async (req, res) => {
         return res.status(500).json({ message: "Server error during checkout process", error: err.message });
     }
 };
+
 const handleStripeSuccess = async (req, res) => {
     const sessionId = req.query.session_id;
 
     try {
-        // 1. جلب تفاصيل الجلسة من Stripe
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-        // 2. التحقق من حالة الدفع
         if (session.payment_status !== 'paid') {
-            // يمكن إعادة توجيه المستخدم إلى صفحة 'الدفع فشل'
             return res.redirect(`${process.env.CLIENT_URL}/payment-failed`);
         }
 
-        // 3. منع التنفيذ المزدوج
-        // (يجب أن تتحقق مما إذا كان الطلب قد تم إنشاؤه بالفعل باستخدام sessionId أو OrderId مخزن في metadata)
-
-        // 4. استخلاص البيانات من metadata
         const { userId, shippingAddressId, deliveryMethod } = session.metadata;
 
-        // 5. جلب السلة والعنوان والمستخدم (لإعادة بناء بيانات الطلب)
         const userDoc = await User.findById(userId);
-        const shippingAddress = userDoc.addresses.id(shippingAddressId);
+        const shippingAddress = userDoc.addresses.find(
+            addr => addr._id.toString() === shippingAddressId
+        );
+
+        if (!shippingAddress) {
+            return res.status(400).json({
+                message: "Shipping address not found or doesn't belong to user"
+            });
+        }
         const cart = await Cart.findOne({ user: userId }).populate("items.product");
 
-        // 6. حساب الإجماليات مرة أخرى (للتأكد)
         const governate = await Governate.findOne({ name: shippingAddress.governorate });
         const totals = calculateCartTotals(cart, governate, deliveryMethod, cart.discountAmount || 0, cart.freeShipping || false);
 
-        // 7. إنشاء الطلب النهائي
         const newOrder = await createFinalOrder(
             userId,
             userDoc,
             shippingAddress,
             totals,
             'Online',
-            'Paid', // الحالة مدفوعة
+            'Paid',
             cart
         );
 
-        // 8. إنهاء العملية (تخفيض المخزون وتفريغ السلة)
         await sendOrderConfirmationEmail(userDoc.email, userDoc.name, newOrder.orderNumber, newOrder.totalAmount);
         await finalizeOrder(cart);
 
-        // 9. إعادة توجيه العميل إلى صفحة تأكيد الطلب
         res.redirect(`${process.env.CLIENT_URL}/order-confirmation/${newOrder._id}`);
 
     } catch (err) {
@@ -996,9 +1124,12 @@ const handleStripeSuccess = async (req, res) => {
         res.redirect(`${process.env.CLIENT_URL}/payment-failed?error=server`);
     }
 };
+
 module.exports = {
     getCart,
     getCartSummary,
+    calculateShipping,
+    getCompleteInvoice,
     getShippingOptions,
     getSavedAddresses,
     addNewAddress,

@@ -24,10 +24,11 @@ router.post('/address', auth, addNewAddress);
 router.put('/address/:addressId', auth, updateAddress);
 router.delete('/address/:addressId', auth, deleteAddress);
 router.get('/addresses', auth, getSavedAddresses);
-router.get('/shipping-options', auth, authorize('buyer'), getShippingOptions);
+router.get('/shipping-options', auth, getShippingOptions);
 router.post('/apply-promo', auth, applyPromotionCode);
 router.delete('/remove-promo', auth, removePromotionCode);
-router.get('/summary', auth, authorize('buyer'), getCartSummary);
-router.post('/checkout', auth, authorize('buyer'), initiatePayment);
+router.get('/summary', auth, getCartSummary);
+router.post('/checkout', auth,  initiatePayment);
 //router.post('/checkout', auth, initiatePayment);
+
 module.exports = router;
