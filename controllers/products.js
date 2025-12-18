@@ -339,7 +339,7 @@ const getProducts = async (req, res) => {
         const {
             category, condition, minPrice, maxPrice, brand,
             search, lowStock, showArchived, sort,cpu,gpu,ram,storage,
-            page = 1, limit = 20, seller, featured
+            page = 1, seller, featured
         } = req.query;
 
         let filter = {};
@@ -375,18 +375,24 @@ const getProducts = async (req, res) => {
         if (lowStock === 'true' && isAdmin(req.user)) {
             filter.$expr = { $lte: ["$stockQuantity", "$lowStockThreshold"] };
         }
-
+        
         // Visibility filter
-        if (!isAdmin(req.user) && !isSeller(req.user)) {
-            filter.visibility = "Published";
-        } else if (isSeller(req.user)) {
-            // Sellers can see their own products regardless of visibility
-            // but others' products must be published
+        if (isAdmin(req.user)) {
+            filter.visibility = { $in: ["Published", "Draft", "Hidden"] };
+
+        } 
+        else if (isSeller(req.user)) {
             filter.$or = [
                 { seller: req.user.id },
                 { visibility: "Published" }
             ];
+        } 
+        else {
+            // Customer
+            filter.visibility = "Published";
         }
+        // Admin -> مش محتاج فلتر visibility، يشوف كل شيء
+
 
         let sortOption = { isFeatured: -1, createdAt: -1 };
         if (sort === 'price_asc') sortOption = { price: 1 };
@@ -396,23 +402,35 @@ const getProducts = async (req, res) => {
         if (sort === 'newest') sortOption = { createdAt: -1 };
         if (sort === 'oldest') sortOption = { createdAt: 1 };
 
-        const skip = (page - 1) * limit;
-
-        const [products, total] = await Promise.all([
+        // const skip = (page - 1) * limit;
+let products, total;
+        if(isAdmin(req.user)){
+            [products, total] = await Promise.all([
+            Product.find()
+                .populate('seller', 'name profilePicture')
+                .sort(sortOption),
+                // .skip(skip)
+                // .limit(Number(limit)),
+            Product.countDocuments()
+        ]);
+        }
+        else{
+            [products, total] = await Promise.all([
             Product.find(filter)
                 .populate('seller', 'name profilePicture')
-                .sort(sortOption)
-                .skip(skip)
-                .limit(Number(limit)),
+                .sort(sortOption),
+                // .skip(skip)
+                // .limit(Number(limit)),
             Product.countDocuments(filter)
         ]);
+        }
 
         res.status(200).json({
             success: true,
             count: products.length,
             total,
-            page: Number(page),
-            pages: Math.ceil(total / limit),
+            // page: Number(page),
+            // pages: Math.ceil(total / limit),
             products
         });
 
@@ -611,9 +629,11 @@ const getLowStockProducts = async (req, res) => {
 
         const { sellerId } = req.query;
         let filter = {
+            stockQuantity: { $gt: 0 },
             $expr: { $lte: ["$stockQuantity", "$lowStockThreshold"] },
             isDeleted: false
         };
+
 
         if (sellerId) {
             filter.seller = sellerId;
@@ -643,6 +663,20 @@ const getLowStockProducts = async (req, res) => {
         });
     }
 };
+
+const getOutOfStockProducts = async (req, res) => {
+    try {
+        const count = await Product.countDocuments({
+        stockQuantity: { $lte: 0 }
+        });
+
+        res.json({ count });
+    } catch (error) {
+        console.error("getOutOfStockProducts Error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
 
 // ================================================
 // 11. UPDATE STOCK QUANTITY (Admin & Seller - Owner Only)
@@ -776,7 +810,6 @@ const updateVisibility = async (req, res) => {
                 message: "Access denied: You can only update your own products"
             });
         }
-
         const validVisibilities = ["Published", "Draft", "Hidden"];
         if (!validVisibilities.includes(visibility)) {
             return res.status(400).json({
@@ -791,7 +824,7 @@ const updateVisibility = async (req, res) => {
         res.status(200).json({
             success: true,
             message: `Product visibility updated to ${visibility}`,
-            visibility: product.visibility
+            product
         });
 
     } catch (error) {
@@ -920,5 +953,6 @@ module.exports = {
     updateStock,
     toggleFeatured,
     updateVisibility,
-    getSellerStats
+    getSellerStats,
+    getOutOfStockProducts
 };

@@ -1,10 +1,12 @@
 const User = require('../models/users'); 
 const Cart = require('../models/carts');
+const Governate = require('../models/governates');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { sendResetPasswordEmail } = require('../utilities/email');
 const { sendWelcomeEmail } = require('../utilities/email');
+const { sendStatusUpdateEmail } = require('../utilities/email');
 const secret = process.env.JWT_SECRET;
 
 const sanitizeUser = (user) => {
@@ -84,9 +86,23 @@ const login = async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ message: 'Invalid password' });
 
-        if (!user.isEmailVerified) {
+                // داخل دالة login في controllers/users.js (بعد التأكد من كلمة المرور)
+        
+            if (!user.isEmailVerified) {
             return res.status(403).json({ message: 'Please verify your email address first.' });
         }
+        if (user.role !== 'buyer'&& user.role !=='admin') {
+    if (user.accountStatus === 'pending') {
+        return res.status(403).json({ 
+            message: 'Your account is pending admin approval. Only buyers can log in immediately.' 
+        });
+    }
+    if (user.accountStatus === 'rejected') {
+        return res.status(403).json({ 
+            message: 'Your staff/seller application has been rejected. Please contact administration.' 
+        });
+    }
+}
 
         if (user.twoFactorEnabled) {
             return res.status(200).json({
@@ -150,13 +166,21 @@ const getUserById = async (req, res) => {
 // 4. Update User
 const updateUser = async (req, res) => {
     try {
-        const { password, role, ...updateData } = req.body;
-        const userId = req.user.id; 
+const { password, role, accountStatus, isBanned, ...updateData } = req.body;    
+        const userId = req.user.id;
+
+            if (password) {
+            const salt = await bcrypt.genSalt(10);
+            updateData.password = await bcrypt.hash(password, salt);
+        }
 
         if (req.file) {
             updateData.profilePicture = req.file.path;
         }
-
+        if (req.file) {
+            updateData.profilePicture = req.file.path;
+        }
+        
         const updatedUser = await User.findByIdAndUpdate(
             userId,
             updateData,
@@ -177,7 +201,7 @@ const updateUser = async (req, res) => {
 //updateUserById for admin to update any user
 const updateUserById = async (req, res) => {
     try {
-        const { password, role, ...updateData } = req.body;
+        const { password, ...updateData } = req.body;
         if (req.user.role !== 'admin') {
             return res.status(403).json({ message: 'Forbidden: Admins only' });
         }   
@@ -412,6 +436,229 @@ const toggleBanUser = async (req, res) => {
         res.status(500).json({ message: "Server Error" });
     }
 };
+// في controllers/users.js
+const reviewUserStatus = async (req, res) => {
+    try {
+        const { status } = req.body; // 'approved' or 'rejected'
+        const userId = req.params.id;
+
+        if (!['approved', 'rejected'].includes(status)) {
+            return res.status(400).json({ message: 'Invalid status' });
+        }
+
+        const user = await User.findByIdAndUpdate(
+            userId, 
+            { accountStatus: status }, 
+            { new: true }
+        );
+
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        // هنا يمكن إرسال إيميل للمستخدم لإبلاغه بالقرار
+        await sendStatusUpdateEmail(user.email, user.name, status);
+
+        res.json({ message: `User status updated to ${status}`, user:sanitizeUser(user) });
+    } catch (err) {
+        console.error("Error in reviewUserStatus:", err.message);
+        res.status(500).json({ message: "Server Error" });
+    }
+};
+
+const addNewAddress = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+
+        const {
+            label,
+            street,
+            city,
+            governorate,
+            zipCode,
+            isDefault = false
+        } = req.body;
+
+        // Validate required fields based on your AddressSchema
+        if (!label || !['Home', 'Work', 'Other'].includes(label)) {
+            return res.status(400).json({
+                message: "Valid label is required (Home, Work, or Other)"
+            });
+        }
+
+        if (!street || !city || !governorate) {
+            return res.status(400).json({
+                message: "Street, city, and governorate are required"
+            });
+        }
+
+        // Verify governate exists in database
+        const governateInfo = await Governate.findOne({ name: governorate });
+        if (!governateInfo) {
+            return res.status(400).json({
+                message: "Invalid governorate. Please select from available governorates.",
+                availableGovernorates: (await Governate.find().select('name')).map(g => g.name)
+            });
+        }
+
+        const user = await User.findById(req.user.id);
+        if (isDefault === true || isDefault === 'true') {
+            user.addresses.forEach(addr => {
+                addr.isDefault = false;
+            });
+        }
+        // Create new address object matching your schema
+        const newAddress = {
+            label,
+            street,
+            city,
+            governorate,
+            zipCode: zipCode || "",
+            isDefault: isDefault === true || isDefault === 'true' 
+        };
+
+        // If this is default, unset other defaults
+        if (isDefault && user.addresses.length > 0) {
+            user.addresses.forEach(addr => {
+                addr.isDefault = false;
+            });
+        }
+
+        user.addresses.push(newAddress);
+        await user.save();
+
+        res.status(201).json({
+            message: "Address added successfully",
+            address: newAddress,
+            totalAddresses: user.addresses.length
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+const updateAddress = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+
+        const { addressId } = req.params;
+        const updates = req.body;
+
+        if (!addressId) {
+            return res.status(400).json({ message: "Address ID is required" });
+        }
+
+        // Validate governorate if being updated
+        if (updates.governorate) {
+            const governateInfo = await Governate.findOne({ name: updates.governorate });
+            if (!governateInfo) {
+                return res.status(400).json({
+                    message: "Invalid governorate"
+                });
+            }
+        }
+
+        const user = await User.findById(req.user.id);
+
+        // Find the address index
+        const addressIndex = user.addresses.findIndex(addr => addr._id.toString() === addressId);
+
+        if (addressIndex === -1) {
+            return res.status(404).json({ message: "Address not found" });
+        }
+
+
+        // If setting as default, unset other defaults
+        if (updates.isDefault === true) {
+            user.addresses.forEach(addr => {
+                addr.isDefault = false;
+            });
+            updates.isDefault = true;
+        }
+
+        // Update the address
+        user.addresses[addressIndex] = {
+            ...user.addresses[addressIndex].toObject(),
+            ...updates
+        };
+
+        await user.save();
+
+        res.json({
+            message: "Address updated successfully",
+            address: user.addresses[addressIndex]
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+const deleteAddress = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+
+        const { addressId } = req.params;
+
+        if (!addressId) {
+            return res.status(400).json({ message: "Address ID is required" });
+        }
+
+        const user = await User.findById(req.user.id);
+
+        // Filter out the address to delete
+        const initialLength = user.addresses.length;
+        user.addresses = user.addresses.filter(addr => addr._id.toString() !== addressId);
+
+        if (user.addresses.length === initialLength) {
+            return res.status(404).json({ message: "Address not found" });
+        }
+
+        await user.save();
+
+        res.json({
+            message: "Address deleted successfully",
+            remainingAddresses: user.addresses.length
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+const getSavedAddresses = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+
+        const user = await User.findById(req.user.id).select('addresses');
+
+        if (!user || !user.addresses || user.addresses.length === 0) {
+            return res.json({
+                addresses: [],
+                message: "No saved addresses found"
+            });
+        }
+
+        // Find default address
+        const defaultAddress = user.addresses.find(addr => addr.isDefault);
+
+        res.json({
+            addresses: user.addresses,
+            defaultAddress: defaultAddress || null,
+            count: user.addresses.length
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
 
 module.exports = {
     createUser,
@@ -426,5 +673,10 @@ module.exports = {
     resetPassword,
     verifyEmail,
     toggleBanUser,
-    updateUser
+    updateUser,
+    reviewUserStatus,
+    addNewAddress,
+    updateAddress,
+    deleteAddress,
+    getSavedAddresses
 };

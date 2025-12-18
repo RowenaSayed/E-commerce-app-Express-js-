@@ -9,7 +9,8 @@ const {
     requestReturn, 
     deleteOrder ,
     adminCreateOrder,
-    getUserReturnRequests
+    getUserReturnRequests,
+    getOrdersByUserId
 } = require('../controllers/orders');
 const { auth, authorize } = require('../middleware/auth');
 
@@ -20,6 +21,8 @@ router.post('/admin', auth, authorize('admin', 'support'),adminCreateOrder); // 
 router.get('/', auth, getOrders);
 
 router.get('/return', auth, getUserReturnRequests);
+router.get('/user/:userId', getOrdersByUserId);
+
 // 3. View Specific Order
 router.get('/:id', auth, getOrderById);
 

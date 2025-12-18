@@ -18,7 +18,8 @@ const {
     updateStock,
     getSellerStats,
     toggleFeatured,
-    updateVisibility
+    updateVisibility,
+    getOutOfStockProducts
 } = require('../controllers/products');
 
 /* =========================
@@ -123,7 +124,7 @@ router.get(
 );
 
 /* =========================
-   Public Routes
+    Public Routes
 ========================= */
 
 // Get all products (supports admin filters like lowStock)
@@ -134,8 +135,9 @@ router.get('/:id', getProductById);
 router.get('/category/:category', getProductByCategory);
 
 router.get('/seller/:sellerId', getProductsBySeller);
+router.get("/stats/out-of-stock", getOutOfStockProducts);
 
 /* =========================
-   Export Router
+    Export Router
 ========================= */
 module.exports = router;

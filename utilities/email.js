@@ -32,14 +32,8 @@ const sendEmail = async (options) => {
     }
 };
 
-// ============================================================
-// دوال القوالب (Templates) - كل واحدة بتهندل حالة مختلفة
-// ============================================================
-
-// 1. إيميل استعادة كلمة المرور (Forgot Password)
 const sendResetPasswordEmail = async (email, token) => {
-    const resetURL = `http://localhost:8000/api/users/reset-password/${token}`; // رابط الفرونت إند
-    
+    const resetURL = `http://localhost:4200/reset-password/${token}`;   
     const message = `You requested a password reset. Click here: ${resetURL}`;
     const html = `
         <div style="font-family: Arial, sans-serif; padding: 20px;">
@@ -151,11 +145,45 @@ const sendOrderConfirmationEmail = async (email, name, orderNumber, totalAmount)
         // يمكنك إرسال إشعار إلى لوحة الإدارة إذا فشل الإيميل
     }
 };
+const sendStatusUpdateEmail = async (email, name, status) => {
+      const loginURL = "http://localhost:8000/api/users/login";
+    const isApproved = status === 'approved';
+    const subject = isApproved ? 'Your Account has been Approved! 🎉' : 'Update regarding your account application';
+    
+    const message = isApproved 
+        ? `Hello ${name},\n\nGreat news! Your account has been reviewed and approved. You can now log in and start using the platform.`
+        : `Hello ${name},\n\nWe regret to inform you that your account application has been rejected at this time. If you have questions, please contact our support team.`;
+
+    const html = `
+        <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee;">
+            <h2>Hello ${name},</h2>
+            <p>${isApproved ? 'Your account has been <b>Approved</b>! ✅' : 'Your account status has been updated.'}</p>
+            <p>${message}</p>
+            ${isApproved ? `<a href="${loginURL}" style="background: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Login Now</a>` : ''}
+            <br><br>
+            <p>Best regards,<br>The Admin Team</p>
+        </div>
+    `;
+
+    try {
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: subject,
+            text: message,
+            html: html
+        });
+        console.log(`Status email sent to ${email}`);
+    } catch (error) {
+        console.error("Error sending status email:", error);
+    }
+};
 // تصدير كل الدوال عشان نستخدمها في الكنترولرز المختلفة
 module.exports = { 
     sendResetPasswordEmail, 
     sendTicketStatusEmail, 
     sendOrderStatusEmail,
     sendWelcomeEmail,
-    sendOrderConfirmationEmail
+    sendOrderConfirmationEmail,
+    sendStatusUpdateEmail
 };

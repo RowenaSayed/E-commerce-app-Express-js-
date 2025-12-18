@@ -13,7 +13,6 @@ const CategorySchema = new Schema(
                 'Desktops',
                 'Accessories',
                 'Components',
-                'Peripherals',
                 'Other'
             ],
             required: true

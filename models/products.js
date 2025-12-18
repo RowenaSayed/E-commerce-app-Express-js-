@@ -30,7 +30,7 @@ const ProductSchema = new Schema({
     
     category: {
         type: String,
-        enum: ['Laptops', 'Desktops', 'Accessories', 'Components', 'Peripherals', 'Other'],
+        enum: ['Laptops', 'Desktops', 'Accessories', 'Components', 'Other'],
         required: true
     },
     subCategory: String,

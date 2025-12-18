@@ -584,7 +584,6 @@ const updateOrderStatus = async (req, res) => {
                     );
             }
         }
-
         // FR-A19: استرجاع المخزون (Restock) تلقائياً عند الإلغاء أو الإرجاع
         // الشرط: الحالة الجديدة "Cancelled/Returned" AND الحالة القديمة لم تكن كذلك
         if ((status === 'Cancelled' || status === 'Returned') && (oldStatus !== 'Cancelled' && oldStatus !== 'Returned')) {
@@ -666,6 +665,20 @@ const getUserReturnRequests = async (req, res) => {
     }
 };
 
+const getOrdersByUserId = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const orders = await Order.find({ user: userId })
+        .populate("items.product", "name price images");
+
+        res.json(orders);
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+
 module.exports = {
     createOrder,
     getOrders,
@@ -675,5 +688,6 @@ module.exports = {
     updateOrderStatus,
     deleteOrder,
     adminCreateOrder,
-    getUserReturnRequests
+    getUserReturnRequests,
+    getOrdersByUserId
 };
