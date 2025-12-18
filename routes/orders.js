@@ -12,6 +12,7 @@ const {
     getUserReturnRequests
 } = require('../controllers/orders');
 const { auth, authorize } = require('../middleware/auth');
+const upload=require('../utilities/fileUpload')
 
 // 1. Create Order
 router.post('/', auth,createOrder);
@@ -27,7 +28,7 @@ router.get('/:id', auth, getOrderById);
 router.put('/:id/cancel', auth, cancelOrder);
 
 // 5. Request Return (User)
-router.post('/:id/return', auth, requestReturn);
+router.post('/:id/return', auth, upload.array('proofImages', 5), requestReturn);
 
 // 6. Update Status (Admin/Support)
 router.put('/:id', auth, authorize('admin', 'support'), updateOrderStatus);

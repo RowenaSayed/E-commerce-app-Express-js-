@@ -81,85 +81,53 @@ const calculateDeliveryDate = (governate, deliveryMethod = 'standard') => {
 
 // Helper to validate and apply promotion
 const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
-    const now = new Date();
-
-    // Find active promotion
-    const promotion = await Promotion.findOne({
-        code: promotionCode,
-        active: true,
-        startDate: { $lte: now },
-        endDate: { $gte: now }
+    const promo = await Promotion.findOne({
+        code: promotionCode.toUpperCase(),
+        active: true
     });
 
-    if (!promotion) {
-        return { valid: false, message: "Invalid or expired promotion code" };
+    if (!promo) {
+        return { valid: false, message: "Invalid promotion code" };
     }
 
-    // Calculate cart subtotal
-    let subtotal = 0;
-    cart.items.forEach(item => {
-        if (item.product && item.product.price) {
-            subtotal += item.product.price * item.quantity;
-        }
-    });
+    const now = new Date();
+    if (promo.startDate > now || promo.endDate < now) {
+        return { valid: false, message: "Promotion expired" };
+    }
 
-    // Check minimum purchase
-    if (promotion.minPurchase && subtotal < promotion.minPurchase) {
+    // حساب subtotal الحقيقي من الكارت
+    const cartSubtotal = cart.items.reduce((sum, item) => {
+        return sum + item.product.price * item.quantity;
+    }, 0);
+
+    if (promo.minPurchase && cartSubtotal < promo.minPurchase) {
         return {
             valid: false,
-            message: `Minimum purchase of ${promotion.minPurchase} EGP required`
+            message: `Minimum purchase is ${promo.minPurchase}`
         };
     }
 
-    // Check total usage limit
-    if (promotion.totalUsageLimit) {
-        // In a real app, you'd track promotion usage in order collection
-        // For now, we'll implement a basic counter on the promotion document
-        if (promotion.usageCount >= promotion.totalUsageLimit) {
-            return { valid: false, message: "Promotion usage limit reached" };
-        }
-    }
-
-    // Check per user usage limit
-    if (promotion.usageLimitPerUser && userId) {
-        // In a real app, you'd track user-specific usage
-        // This would require adding a usage tracking system
-    }
-
-    // Calculate discount based on promotion type
     let discount = 0;
     let freeShipping = false;
-    let description = '';
 
-    switch (promotion.type) {
-        case 'Percentage':
-            discount = subtotal * (promotion.value / 100);
-            description = `${promotion.value}% off`;
-            break;
-
-        case 'Fixed':
-            discount = promotion.value;
-            description = `${promotion.value} EGP off`;
-            break;
-
-        case 'FreeShipping':
-            freeShipping = true;
-            description = 'Free shipping';
-            break;
+    // ⭐ المنطق الصح هنا
+    if (promo.type === 'Percentage') {
+        discount = cartSubtotal * (promo.value / 100);
     }
-
-    // Cap discount to subtotal
-    if (discount > subtotal) {
-        discount = subtotal;
+    else if (promo.type === 'Fixed') {
+        discount = Math.min(promo.value, cartSubtotal);
+    }
+    else if (promo.type === 'FreeShipping') {
+        freeShipping = true;
+        discount = 0;
     }
 
     return {
         valid: true,
-        promotion,
         discount,
         freeShipping,
-        description,
-        maxDiscount: promotion.maxDiscount || null
+        promotion: promo,
+        description: promo.description
     };
 };
 

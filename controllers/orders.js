@@ -502,38 +502,30 @@ const cancelOrder = async (req, res) => {
 const requestReturn = async (req, res) => {
     try {
         const userId = req.user._id || req.user.id;
-        const { reason, comment, proofImages } = req.body;
+        const { reason, comment } = req.body;
+
         const order = await Order.findById(req.params.id);
-
         if (!order) return res.status(404).json({ message: "Order not found" });
-        if (order.user.toString() !== userId.toString()) return res.status(403).json({ message: "Access denied" });
 
-        if (order.orderStatus !== 'Delivered') {
-            return res.status(400).json({ message: "Cannot return an item that hasn't been delivered." });
-        }
+        if (order.user.toString() !== userId.toString())
+            return res.status(403).json({ message: "Access denied" });
 
-        // FR-O13: 7 days check
-        const deliveryDate = new Date(order.actualDeliveryDate || order.updatedAt);
-        const currentDate = new Date();
-        const diffDays = Math.ceil(Math.abs(currentDate - deliveryDate) / (1000 * 60 * 60 * 24));
+        if (order.orderStatus !== 'Delivered')
+            return res.status(400).json({ message: "Order not delivered yet" });
 
-        if (diffDays > 7) {
-            return res.status(400).json({ message: "Return period (7 days) has expired." });
-        }
-
-        // FR-O15: Images required
-        // if (!proofImages || proofImages.length === 0) {
-        //     return res.status(400).json({ message: "Proof images are required." });
-        // }
+        const proofImages = req.files?.map(file => file.path) || [];
 
         order.isReturnRequested = true;
         order.returnDetails = {
-            reason, comment, proofImages,
+            reason,
+            comment,
+            proofImages,
             requestDate: Date.now(),
             status: 'Return Requested'
         };
 
         await order.save();
+
         res.json({ message: "Return requested successfully", order });
 
     } catch (err) {
