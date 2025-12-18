@@ -35,7 +35,7 @@ const calculateCartTotals = (cart, governate, deliveryMethod = 'standard', disco
     const deliveryFee = calculateDeliveryFee(governate, deliveryMethod, freeShipping);
 
     // VAT only on products (not shipping)
-    const vatRate = 0.14;
+    const vatRate = 0.05;
     const vat = discountedSubtotal * vatRate;
 
     const total = discountedSubtotal + deliveryFee + vat;
@@ -221,7 +221,7 @@ const getCart = async (req, res) => {
             total: 0,
             discount: cart.discountAmount || 0,
             discountCode: cart.discountCode || null,
-            vatRate: 14
+            vatRate: 5
         };
 
         if (cart.items.length > 0) {
@@ -234,7 +234,7 @@ const getCart = async (req, res) => {
             let finalSubtotal = totals.subtotal - totals.discount;
             if (finalSubtotal < 0) finalSubtotal = 0;
 
-            totals.vat = finalSubtotal * 0.14;
+            totals.vat = finalSubtotal * 0.05;
             totals.total = finalSubtotal + totals.vat;
         }
 
@@ -342,7 +342,7 @@ const calculateShipping = async (req, res) => {
         // Use the same helper function for consistency
         const deliveryFee = calculateDeliveryFee(governate, deliveryMethod, cart.freeShipping || false);
 
-        const vatRate = 0.14;
+        const vatRate = 0.05;
         const vat = finalSubtotal * vatRate;
         const total = finalSubtotal + deliveryFee + vat;
         const estimatedDelivery = calculateDeliveryDate(governate, deliveryMethod);
@@ -421,7 +421,7 @@ const getCompleteInvoice = async (req, res) => {
             cart.freeShipping || false
         );
 
-        const vatRate = 0.14;
+        const vatRate = 0.05;
         const vat = finalSubtotal * vatRate;
         const total = finalSubtotal + deliveryFee + vat;
 
@@ -1020,7 +1020,7 @@ const initiatePayment = async (req, res) => {
                 const discountedItemTotal = originalItemTotal - itemDiscount;
 
                 // Calculate VAT for this item
-                const itemVAT = discountedItemTotal * 0.14;
+                const itemVAT = discountedItemTotal * 0.05;
 
                 // Calculate final price per unit
                 const finalUnitPrice = (discountedItemTotal + itemVAT) / item.quantity;
