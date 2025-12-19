@@ -150,6 +150,26 @@ const login = async (req, res) => {
     }
 };
 
+// GET /api/users?role=seller
+const getUsers = async (req, res) => {
+    try {
+        const { role } = req.query;
+
+        const filter = {};
+        if (role) filter.role = role;
+
+        const users = await User.find(filter)
+        .select('-password -twoFactorSecret -twoFactorRecoveryCodes -verificationToken');
+
+        res.status(200).json({
+        success: true,
+        users
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+};
+
 // 3. Get User
 const getUserById = async (req, res) => {
     try {
@@ -660,6 +680,52 @@ const getSavedAddresses = async (req, res) => {
 };
 
 
+const updateSellerStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { action } = req.body;
+        const user = await User.findById(id);
+
+        if (!user) {
+        return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        if (user.role !== 'seller') {
+        return res.status(400).json({ success: false, message: 'This user is not a seller' });
+        }
+
+        switch (action) {
+        case 'approve':
+            user.accountStatus = 'approved';
+            user.isBanned = false; // فقط عند الموافقة
+            break;
+        case 'reject':
+            user.accountStatus = 'rejected';
+            // لا تمسح isBanned
+            break;
+        case 'ban':
+            user.isBanned = true;
+            break;
+        case 'unban':
+            user.isBanned = false;
+            break;
+        default:
+            return res.status(400).json({ success: false, message: 'Invalid action' });
+        }
+
+        await user.save();
+
+        res.status(200).json({
+        success: true,
+        message: `Seller status updated to ${action}`,
+        user
+        });
+
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     createUser,
     login,
@@ -678,5 +744,6 @@ module.exports = {
     addNewAddress,
     updateAddress,
     deleteAddress,
-    getSavedAddresses
+    getSavedAddresses,
+    updateSellerStatus,getUsers
 };

@@ -20,7 +20,8 @@ const {
     addNewAddress,
     updateAddress,
     deleteAddress,
-    getSavedAddresses
+    getSavedAddresses,
+    updateSellerStatus,getUsers
 } = require('../controllers/users');
 
 const { auth, authorize } = require('../middleware/auth');
@@ -40,12 +41,14 @@ router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط ي�
 router.put('/profile',upload.single('profilePicture'), auth, updateUser); // المستخدم يحدث بياناته (بدون صورة بروفايل)
 router.post('/address', auth, addNewAddress);
 router.get('/addresses', auth, getSavedAddresses);
+router.get('/seller',auth,authorize('admin'),getUsers)
 // --- 3. 🚀 المسارات الديناميكية (يجب أن تأتي أخيراً) 🚀
 router.get('/:id', auth, getUserById); // المستخدم يشوف بياناته
 //for Admin to update any user and for user to update his own data
 router.put('/user/:id', auth, upload.single('profilePicture'), updateUserById);  
 // المستخدم يحدث بياناته + صورة بروفايل
 router.put('/:id/toggle-ban', auth, authorize('admin'), toggleBanUser); // الأدمن يوقف/يفعل يوزر
+router.put('/:id/status',auth,authorize('admin'),updateSellerStatus)
 router.delete('/:id', auth, authorize('admin'), deleteUserById); // الأدمن يحذف
 // في routes/users.js
 router.put('/:id/review', auth, authorize('admin'), reviewUserStatus);

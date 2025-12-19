@@ -17,6 +17,7 @@ const {
     restoreProduct,
     updateStock,
     getSellerStats,
+    getSellerStatsById,
     toggleFeatured,
     updateVisibility,
     getOutOfStockProducts
@@ -120,8 +121,9 @@ router.get(
     '/stats/seller',
     auth,
     authorize('seller'),
-    getSellerStats
+    getSellerStatsById
 );
+router.get('/allStats',auth,authorize('admin'),getSellerStats)
 
 /* =========================
     Public Routes

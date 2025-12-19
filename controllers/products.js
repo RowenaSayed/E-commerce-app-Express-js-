@@ -1,4 +1,5 @@
 const Product = require('../models/products');
+const User =require('../models/users')
 
 // ================================================
 // HELPER FUNCTIONS
@@ -839,7 +840,7 @@ const updateVisibility = async (req, res) => {
 // ================================================
 // 14. GET SELLER DASHBOARD STATS (Seller Only)
 // ================================================
-const getSellerStats = async (req, res) => {
+const getSellerStatsById = async (req, res) => {
     try {
         if (!isSeller(req.user)) {
             return res.status(403).json({
@@ -936,6 +937,35 @@ const getSellerStats = async (req, res) => {
     }
 };
 
+
+const getSellerStats = async (req, res) => {
+  try {
+        // جلب كل السيلرز
+        const sellers = await User.find({ role: 'seller' })
+        .select('name email accountStatus');
+
+        // جلب كل المنتجات المرتبطة بالسيلرز
+        const products = await Product.find({});
+
+        // ربط كل seller بالمنتجات الخاصة به
+        const sellersWithStats = sellers.map(seller => {
+            const sellerProducts = products.filter(p => p.seller.toString() === seller._id.toString());
+            const revenue = sellerProducts.reduce((acc, p) => acc + (p.price || 0), 0);
+            const productsCount = sellerProducts.length;
+
+            return {
+                ...seller.toObject(),
+                revenue,
+                productsCount
+            };
+        });
+
+        res.status(200).json({ success: true, sellers: sellersWithStats });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Server Error', error });
+    }
+};
 // ================================================
 // EXPORT ALL CONTROLLERS
 // ================================================
@@ -953,6 +983,7 @@ module.exports = {
     updateStock,
     toggleFeatured,
     updateVisibility,
+    getSellerStatsById,
     getSellerStats,
     getOutOfStockProducts
 };
