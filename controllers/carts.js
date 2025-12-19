@@ -490,7 +490,11 @@ const addNewAddress = async (req, res) => {
         }
 
         const user = await User.findById(req.user.id);
-
+        if(isDefault === true || isDefault === 'true') {
+            user.addresses.forEach(addr => {
+                addr.isDefault = false;
+            });
+        }
         // Create new address object matching your schema
         const newAddress = {
             label,
@@ -498,7 +502,7 @@ const addNewAddress = async (req, res) => {
             city,
             governorate,
             zipCode: zipCode || "",
-            isDefault
+            isDefault: isDefault === true || isDefault === 'true'
         };
 
         // If this is default, unset other defaults
@@ -559,6 +563,7 @@ const updateAddress = async (req, res) => {
             user.addresses.forEach(addr => {
                 addr.isDefault = false;
             });
+            updates.isDefault = true;
         }
 
         // Update the address

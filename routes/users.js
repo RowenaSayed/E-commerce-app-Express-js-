@@ -14,7 +14,11 @@ const {
     verifyEmail,
     toggleBanUser,
     updateUser,
-    reviewUserStatus
+    reviewUserStatus,
+    addNewAddress,
+    updateAddress,
+    deleteAddress,
+    getSavedAddresses
 } = require('../controllers/users');
 
 const { auth, authorize } = require('../middleware/auth');
@@ -31,16 +35,21 @@ router.get('/verify/:token', verifyEmail); // ✅ تم نقل المسار ال�
 
 // --- 2. 🛡️ المسارات المحمية العامة والخاصة ---
 router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط يشوف كل اليوزرز (ثابت)
-
+router.put('/profile',upload.single('profilePicture'), auth, updateUser); // المستخدم يحدث بياناته (بدون صورة بروفايل)
+router.post('/address', auth, addNewAddress);
+router.get('/addresses', auth, getSavedAddresses);
 // --- 3. 🚀 المسارات الديناميكية (يجب أن تأتي أخيراً) 🚀
 router.get('/:id', auth, getUserById); // المستخدم يشوف بياناته
 //for Admin to update any user and for user to update his own data
 router.put('/user/:id', auth, upload.single('profilePicture'), updateUserById);  
 // المستخدم يحدث بياناته + صورة بروفايل
-router.put('/profile',upload.single('profilePicture'), auth, updateUser); // المستخدم يحدث بياناته (بدون صورة بروفايل)
 router.put('/:id/toggle-ban', auth, authorize('admin'), toggleBanUser); // الأدمن يوقف/يفعل يوزر
 router.delete('/:id', auth, authorize('admin'), deleteUserById); // الأدمن يحذف
 // في routes/users.js
 router.put('/:id/review', auth, authorize('admin'), reviewUserStatus);
+
+router.put('/address/:addressId', auth, updateAddress);
+router.delete('/address/:addressId', auth, deleteAddress);
+
 
 module.exports = router;

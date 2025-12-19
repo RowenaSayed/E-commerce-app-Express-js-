@@ -1,5 +1,6 @@
 const User = require('../models/users'); 
 const Cart = require('../models/carts');
+const Governate = require('../models/governates');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -463,6 +464,202 @@ const reviewUserStatus = async (req, res) => {
     }
 };
 
+const addNewAddress = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+
+        const {
+            label,
+            street,
+            city,
+            governorate,
+            zipCode,
+            isDefault = false
+        } = req.body;
+
+        // Validate required fields based on your AddressSchema
+        if (!label || !['Home', 'Work', 'Other'].includes(label)) {
+            return res.status(400).json({
+                message: "Valid label is required (Home, Work, or Other)"
+            });
+        }
+
+        if (!street || !city || !governorate) {
+            return res.status(400).json({
+                message: "Street, city, and governorate are required"
+            });
+        }
+
+        // Verify governate exists in database
+        const governateInfo = await Governate.findOne({ name: governorate });
+        if (!governateInfo) {
+            return res.status(400).json({
+                message: "Invalid governorate. Please select from available governorates.",
+                availableGovernorates: (await Governate.find().select('name')).map(g => g.name)
+            });
+        }
+
+        const user = await User.findById(req.user.id);
+        if (isDefault === true || isDefault === 'true') {
+            user.addresses.forEach(addr => {
+                addr.isDefault = false;
+            });
+        }
+        // Create new address object matching your schema
+        const newAddress = {
+            label,
+            street,
+            city,
+            governorate,
+            zipCode: zipCode || "",
+            isDefault: isDefault === true || isDefault === 'true' 
+        };
+
+        // If this is default, unset other defaults
+        if (isDefault && user.addresses.length > 0) {
+            user.addresses.forEach(addr => {
+                addr.isDefault = false;
+            });
+        }
+
+        user.addresses.push(newAddress);
+        await user.save();
+
+        res.status(201).json({
+            message: "Address added successfully",
+            address: newAddress,
+            totalAddresses: user.addresses.length
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+const updateAddress = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+
+        const { addressId } = req.params;
+        const updates = req.body;
+
+        if (!addressId) {
+            return res.status(400).json({ message: "Address ID is required" });
+        }
+
+        // Validate governorate if being updated
+        if (updates.governorate) {
+            const governateInfo = await Governate.findOne({ name: updates.governorate });
+            if (!governateInfo) {
+                return res.status(400).json({
+                    message: "Invalid governorate"
+                });
+            }
+        }
+
+        const user = await User.findById(req.user.id);
+
+        // Find the address index
+        const addressIndex = user.addresses.findIndex(addr => addr._id.toString() === addressId);
+
+        if (addressIndex === -1) {
+            return res.status(404).json({ message: "Address not found" });
+        }
+
+
+        // If setting as default, unset other defaults
+        if (updates.isDefault === true) {
+            user.addresses.forEach(addr => {
+                addr.isDefault = false;
+            });
+            updates.isDefault = true;
+        }
+
+        // Update the address
+        user.addresses[addressIndex] = {
+            ...user.addresses[addressIndex].toObject(),
+            ...updates
+        };
+
+        await user.save();
+
+        res.json({
+            message: "Address updated successfully",
+            address: user.addresses[addressIndex]
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+const deleteAddress = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+
+        const { addressId } = req.params;
+
+        if (!addressId) {
+            return res.status(400).json({ message: "Address ID is required" });
+        }
+
+        const user = await User.findById(req.user.id);
+
+        // Filter out the address to delete
+        const initialLength = user.addresses.length;
+        user.addresses = user.addresses.filter(addr => addr._id.toString() !== addressId);
+
+        if (user.addresses.length === initialLength) {
+            return res.status(404).json({ message: "Address not found" });
+        }
+
+        await user.save();
+
+        res.json({
+            message: "Address deleted successfully",
+            remainingAddresses: user.addresses.length
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+const getSavedAddresses = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: "Authentication required" });
+        }
+
+        const user = await User.findById(req.user.id).select('addresses');
+
+        if (!user || !user.addresses || user.addresses.length === 0) {
+            return res.json({
+                addresses: [],
+                message: "No saved addresses found"
+            });
+        }
+
+        // Find default address
+        const defaultAddress = user.addresses.find(addr => addr.isDefault);
+
+        res.json({
+            addresses: user.addresses,
+            defaultAddress: defaultAddress || null,
+            count: user.addresses.length
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+
 module.exports = {
     createUser,
     login,
@@ -477,5 +674,9 @@ module.exports = {
     verifyEmail,
     toggleBanUser,
     updateUser,
-    reviewUserStatus
+    reviewUserStatus,
+    addNewAddress,
+    updateAddress,
+    deleteAddress,
+    getSavedAddresses
 };
