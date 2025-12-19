@@ -340,7 +340,7 @@ const getProducts = async (req, res) => {
         const {
             category, condition, minPrice, maxPrice, brand,
             search, lowStock, showArchived, sort,cpu,gpu,ram,storage,
-            page = 1, seller, featured
+            page = 1,limit=10, seller, featured
         } = req.query;
 
         let filter = {};
@@ -403,15 +403,17 @@ const getProducts = async (req, res) => {
         if (sort === 'newest') sortOption = { createdAt: -1 };
         if (sort === 'oldest') sortOption = { createdAt: 1 };
 
-        // const skip = (page - 1) * limit;
-let products, total;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const skip = (pageNum - 1) * limitNum;
+        let products, total;
         if(isAdmin(req.user)){
             [products, total] = await Promise.all([
             Product.find()
                 .populate('seller', 'name profilePicture')
-                .sort(sortOption),
-                // .skip(skip)
-                // .limit(Number(limit)),
+                .sort(sortOption)
+                 .skip(skip)
+                .limit(limitNum),
             Product.countDocuments()
         ]);
         }
@@ -419,19 +421,22 @@ let products, total;
             [products, total] = await Promise.all([
             Product.find(filter)
                 .populate('seller', 'name profilePicture')
-                .sort(sortOption),
-                // .skip(skip)
-                // .limit(Number(limit)),
+                .sort(sortOption)
+                .skip(skip)
+                .limit(limitNum),
             Product.countDocuments(filter)
         ]);
         }
 
         res.status(200).json({
             success: true,
-            count: products.length,
-            total,
-            // page: Number(page),
-            // pages: Math.ceil(total / limit),
+            results: products.length, // عدد المنتجات في الصفحة الحالية
+            pagination: {
+                totalItems: total,
+                currentPage: pageNum,
+                itemsPerPage: limitNum,
+                totalPages: Math.ceil(total / limitNum)
+            },
             products
         });
 

@@ -12,7 +12,7 @@ const AddressSchema = new Schema({
 
 const UserSchema = new Schema({
     // --- المعلومات الأساسية ---
-    name: { type: String, required: true, trim: true },
+    name: { type: String, required: true, trim: true , index:true },
     email: { 
         type: String, 
         required: true, 
@@ -31,7 +31,7 @@ const UserSchema = new Schema({
         } 
     },
 
-    role: { type: String, enum: ['admin', 'support', 'buyer','seller'], default: 'buyer' },
+    role: { type: String, enum: ['admin', 'support', 'buyer','seller'], default: 'buyer',index:true },
     profilePicture: String,
     addresses: [AddressSchema],
 

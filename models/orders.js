@@ -5,7 +5,8 @@ const OrderSchema = new Schema({
     // FR-O2: Order Number
     orderNumber: { 
         type: String, 
-        unique: true, 
+        unique: true,
+        index:true, 
         sparse: true,
         required: true
     },
@@ -47,7 +48,7 @@ const OrderSchema = new Schema({
     orderStatus: { 
         type: String, 
         enum: ['Order Placed', 'Payment Confirmed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled', 'Returned'], 
-        default: 'Order Placed' 
+        default: 'Order Placed' ,index:true
     },
 
     // Tracking & Dates

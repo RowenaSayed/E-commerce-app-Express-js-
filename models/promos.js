@@ -7,7 +7,8 @@ const PromotionSchema = new Schema({
         required: true,
         unique: true,
         uppercase: true,
-        trim: true
+        trim: true,
+        index: true
     },
     type: {
         type: String,

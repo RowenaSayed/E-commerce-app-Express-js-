@@ -15,14 +15,15 @@ const CategorySchema = new Schema(
                 'Components',
                 'Other'
             ],
-            required: true
+            required: true,index : true
         },
         slug: {
             type: String,
             required: true,
             unique: true,
             lowercase: true,
-            trim: true
+            trim: true,
+            index: true
         },
 
         parent_id: {

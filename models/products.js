@@ -7,16 +7,18 @@ const ProductSchema = new Schema({
     name: { 
         type: String, 
         required: true,
+        index: true,
         trim: true,
         maxlength: [100, 'Name cannot exceed 100 characters']
     },
     nameAr: {
         type: String, 
         trim: true,
+        index: true,
         maxlength: [100, 'Arabic Name cannot exceed 100 characters']
     },
     
-    slug: { type: String, lowercase: true },
+    slug: { type: String, lowercase: true ,index:true},
 
     description: {
         type: String,
@@ -30,6 +32,7 @@ const ProductSchema = new Schema({
     
     category: {
         type: String,
+        index:true,
         enum: ['Laptops', 'Desktops', 'Accessories', 'Components', 'Other'],
         required: true
     },
@@ -37,13 +40,14 @@ const ProductSchema = new Schema({
     
     // FR-A3: Brand & SKU
     brand: String,
-    sku: { type: String, unique: true, sparse: true }, // SKU must be unique
+    sku: { type: String, unique: true, sparse: true ,index:true}, // SKU must be unique
 
     // FR-A3: Product Condition
     condition: { 
         type: String, 
         enum: ["New", "Used", "Imported"], 
-        required: true 
+        required: true ,
+        index:true
     },
 
     usedDetails: {
@@ -61,7 +65,7 @@ const ProductSchema = new Schema({
     },
 
     // FR-A3: Price & Stock
-    price: { type: Number, required: true, min: 0 },
+    price: { type: Number, required: true, min: 0,index:true },
     discount: { type: Number, default: 0 },
     
     // FR-A8: Manage stock & Low stock alerts
@@ -120,7 +124,8 @@ const ProductSchema = new Schema({
         default: 4.5,
         min: [1, 'Rating must be above 1.0'],
         max: [5, 'Rating must be below 5.0'],
-        set: val => Math.round(val * 10) / 10 
+        set: val => Math.round(val * 10) / 10 ,
+        index:true
     },
     ratingsQuantity: {
         type: Number,

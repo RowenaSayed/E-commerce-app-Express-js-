@@ -6,7 +6,8 @@ const TicketSchema = new Schema({
     ticketNumber: { 
         type: String, 
         required: true, 
-        unique: true 
+        unique: true ,
+        index: true
     },
 
     // FR-CS2: ربط التذكرة بالمستخدم
@@ -33,7 +34,8 @@ const TicketSchema = new Schema({
             "Technical Issue", "Return/Refund Request", "Other"
         ],
         required: true,
-        default: "Other"
+        default: "Other",
+        index: true
     },
 
     // FR-CS5: حالة التذكرة
@@ -43,7 +45,8 @@ const TicketSchema = new Schema({
             "Open", "In Progress", "Waiting for Customer Response", 
             "Resolved", "Closed"
         ], 
-        default: "Open" 
+        default: "Open" ,
+        index: true
     },
 
     // الموظف المسؤول
