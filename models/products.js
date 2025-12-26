@@ -1,0 +1,130 @@
+const mongoose = require("mongoose");
+const { Schema } = mongoose;
+
+const ProductSchema = new Schema({
+    seller: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    name: { 
+        type: String, 
+        required: true,
+        index: true,
+        trim: true,
+        maxlength: [100, 'Name cannot exceed 100 characters']
+    },
+    nameAr: {
+        type: String, 
+        trim: true,
+        index: true,
+        maxlength: [100, 'Arabic Name cannot exceed 100 characters']
+    },
+    
+    slug: { type: String, lowercase: true ,index:true},
+
+    description: {
+        type: String,
+        required: [true, 'Please provide description'],
+        maxlength: [2000, 'Description cannot exceed 2000 characters']
+    },
+    descriptionAr: { 
+        type: String,
+        maxlength: [2000, 'Arabic Description cannot exceed 2000 characters']
+    },
+    
+    category: {
+        type: String,
+        index:true,
+        enum: ['Laptops', 'Desktops', 'Accessories', 'Components', 'Other'],
+        required: true
+    },
+    subCategory: String,
+    
+    brand: String,
+    sku: { type: String, unique: true, sparse: true ,index:true}, 
+
+    condition: { 
+        type: String, 
+        enum: ["New", "Used", "Imported"], 
+        required: true ,
+        index:true
+    },
+
+    usedDetails: {
+        deviceConditionDescription: String,
+        previousUsageDuration: String,
+        manufacturingYear: Number,
+        refurbishmentNotes: String,
+        signsOfWear: String
+    },
+    importedDetails: {
+        countryOfOrigin: String,
+        importDate: Date,
+        internationalWarranty: Boolean,
+        compatibilityNotes: String
+    },
+
+    price: { type: Number, required: true, min: 0,index:true },
+    discount: { type: Number, default: 0 },
+    
+    stockQuantity: { type: Number, required: true, default: 0, min: 0 },
+    lowStockThreshold: { type: Number, default: 5 }, 
+    sold: { type: Number, default: 0 },
+
+    technicalSpecs: {
+        CPU: String,
+        RAM: String,
+        GPU: String,
+        Storage: String,
+        ScreenSize: String,
+        OS: String,
+        Color: String,
+    },
+
+    // FR-A3: Dimensions & Weight
+    dimensions: {
+        length: Number,
+        width: Number,
+        height: Number,
+        unit: { type: String, default: 'cm' }
+    },
+    weight: {
+        value: Number,
+        unit: { type: String, default: 'kg' }
+    },
+
+    warranty: {
+        type: { type: String, enum: ["Manufacturer", "Seller", "Agent", "None"], default: "None" },
+        duration: String,
+        coverageDetails: String,
+        serviceCenters: [String],
+    },
+
+    images: [String], 
+
+    isFeatured: { type: Boolean, default: false }, 
+
+    visibility: { type: String, enum: ["Published", "Draft", "Hidden"], default: "Published" },
+
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
+
+    ratingsAverage: {
+        type: Number,
+        default: 4.5,
+        min: [1, 'Rating must be above 1.0'],
+        max: [5, 'Rating must be below 5.0'],
+        set: val => Math.round(val * 10) / 10 ,
+        index:true
+    },
+    ratingsQuantity: {
+        type: Number,
+        default: 0
+    }
+
+}, { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
+
+ProductSchema.index({ name: 'text', description: 'text', brand: 'text', sku: 'text' });
+
+module.exports = mongoose.model("Product", ProductSchema);
