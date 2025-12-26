@@ -12,8 +12,6 @@ const DailyStatsSchema = new Schema({
     totalOrders: { type: Number, default: 0 },
     newUsers: { type: Number, default: 0 },
     lowStockCount: { type: Number, default: 0 },
-    // يمكن إضافة المزيد من المقاييس اليومية هنا
 }, { timestamps: true });
 
-// هذا الموديل مفيد لتجميع البيانات اليومية بسرعة في الداشبورد
 module.exports = mongoose.model('DailyStats', DailyStatsSchema);

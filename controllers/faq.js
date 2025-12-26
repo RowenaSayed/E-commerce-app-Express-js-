@@ -1,6 +1,5 @@
-const FAQ = require('../models/faq'); // تأكد إن ملف المودل اسمه faq.js
+const FAQ = require('../models/faq');
 
-// 1. Create FAQ (Admin Only)
 const createFAQ = async (req, res) => {
     try {
         const { question, answer, category } = req.body;
@@ -23,7 +22,6 @@ const createFAQ = async (req, res) => {
     }
 };
 
-// 2. Get Public FAQs (For Users/Website)
 const getPublicFAQs = async (req, res) => {
     try {
         const { category } = req.query;
@@ -39,8 +37,6 @@ const getPublicFAQs = async (req, res) => {
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
-
-// 3. Get All FAQs (For Admin Dashboard)
 const getAllFAQs = async (req, res) => {
     try {
         const faqs = await FAQ.find().sort({ createdAt: -1 });
@@ -50,7 +46,6 @@ const getAllFAQs = async (req, res) => {
     }
 };
 
-// 4. Update FAQ (Admin Only)
 const updateFAQ = async (req, res) => {
     try {
         const faq = await FAQ.findById(req.params.id);
@@ -71,7 +66,6 @@ const updateFAQ = async (req, res) => {
     }
 };
 
-// 5. Delete FAQ (Admin Only)
 const deleteFAQ = async (req, res) => {
     try {
         const faq = await FAQ.findById(req.params.id);

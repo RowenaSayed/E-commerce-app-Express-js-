@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-// استدعاء الكونترولر (تأكد إن ملف الكونترولر اسمه faq.js)
 const { 
     createFAQ, 
     getPublicFAQs, 

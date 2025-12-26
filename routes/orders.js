@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose=require('mongoose')
 const { 
     createOrder, 
     getOrders, 
@@ -10,7 +11,8 @@ const {
     deleteOrder ,
     adminCreateOrder,
     getUserReturnRequests,
-    getOrdersByUserId
+    getOrdersByUserId,
+    getSellerOrders
 } = require('../controllers/orders');
 const { auth, authorize } = require('../middleware/auth');
 const upload=require('../utilities/fileUpload')
@@ -22,6 +24,7 @@ router.post('/admin', auth, authorize('admin', 'support'),adminCreateOrder); // 
 router.get('/', auth, getOrders);
 
 router.get('/return', auth, getUserReturnRequests);
+router.get('/seller/my-orders', auth, authorize('seller'), getSellerOrders);
 router.get('/user/:userId', getOrdersByUserId);
 
 // 3. View Specific Order
@@ -34,7 +37,7 @@ router.put('/:id/cancel', auth, cancelOrder);
 router.post('/:id/return', auth, upload.array('proofImages', 5), requestReturn);
 
 // 6. Update Status (Admin/Support)
-router.put('/:id', auth, authorize('admin', 'support'), updateOrderStatus);
+router.put('/:id', auth, authorize(['admin','seller']), updateOrderStatus);
 
 // 7. Delete Order (Admin)
 router.delete('/:id/delete', auth, authorize('admin'), deleteOrder);

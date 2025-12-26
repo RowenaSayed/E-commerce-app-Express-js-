@@ -5,9 +5,7 @@ const Product = require('../models/products');
 // يمكن أن نحتاج لـ require لمودل Governate هنا إذا كانت هناك حاجة لجلب بياناته
 const Governate = require('../models/governates'); 
 
-// Helper function to calculate delivery date (يجب أن يتم نقلها هنا أو استدعاؤها من مكان آخر)
 const calculateDeliveryDate = (governate) => {
-    // هذه الدالة يفترض أنها موجودة لحساب estimatedDeliveryDate
     const estimatedDate = new Date(); 
     estimatedDate.setDate(estimatedDate.getDate() + 5); 
     return estimatedDate;

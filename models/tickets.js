@@ -2,17 +2,14 @@ const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
 const TicketSchema = new Schema({
-    // FR-CS4: Unique Ticket Number (سيتم تمريره من الكنترولر)
     ticketNumber: { 
         type: String, 
         required: true, 
         unique: true 
     },
 
-    // FR-CS2: ربط التذكرة بالمستخدم
     user: { type: Schema.Types.ObjectId, ref: "User", required: true },
 
-    // FR-CS1: تفاصيل الاتصال
     contactDetails: {
         name: { type: String, required: true },
         email: { type: String, required: true },
@@ -22,10 +19,8 @@ const TicketSchema = new Schema({
     subject: { type: String, required: true },
     message: { type: String, required: true },
     
-    // FR-CS1: رقم الطلب (اختياري)
     orderNumber: { type: String, required: false }, 
 
-    // FR-CS3: التصنيفات
     category: { 
         type: String, 
         enum: [
@@ -36,7 +31,6 @@ const TicketSchema = new Schema({
         default: "Other"
     },
 
-    // FR-CS5: حالة التذكرة
     status: { 
         type: String, 
         enum: [
@@ -46,10 +40,8 @@ const TicketSchema = new Schema({
         default: "Open" 
     },
 
-    // الموظف المسؤول
     assignedTo: { type: Schema.Types.ObjectId, ref: "User" },
 
-    // الردود
     responses: [
         {
             sender: { type: Schema.Types.ObjectId, ref: "User" }, 

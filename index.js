@@ -4,11 +4,9 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const sessionMiddleware = require('./middleware/session');
-// const upload = require('./utilities/fileUpload');   
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// إعداد CORS و session
 app.set('trust proxy', 1);
 app.use(cors({
     origin: true,
@@ -20,7 +18,6 @@ app.use(sessionMiddleware);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const Governate = require('./models/governates');
 
-// Import routes
 const adminStatsRoutes = require('./routes/adminStats');
 const userRoutes = require('./routes/users');
 const productRoutes = require('./routes/products');
@@ -56,8 +53,6 @@ app.get('/test-session', (req, res) => {
 mongoose.connect(process.env.MONGO_URI)
     .then(async() => {
         console.log('MongoDB Connected successfully');
-       // await Governate.initializeGovernates();
-       // console.log('Governates initialized successfully or already exist.');
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         });

@@ -11,7 +11,6 @@ const AddressSchema = new Schema({
 });
 
 const UserSchema = new Schema({
-    // --- المعلومات الأساسية ---
     name: { type: String, required: true, trim: true },
     email: { 
         type: String, 
@@ -20,10 +19,8 @@ const UserSchema = new Schema({
         lowercase: true, 
         trim: true 
     },
-    phone: { type: String, sparse: true, unique: true }, // sparse: يسمح بالتكرار للقيم null (في حال سجل بجوجل ولم يدخل رقم هاتف)
+    phone: { type: String, sparse: true, unique: true },
 
-    // --- كلمة المرور (Conditional Requirement) ---
-    // كلمة المرور مطلوبة فقط إذا لم يكن المستخدم مسجلاً عبر السوشيال ميديا
     password: { 
         type: String, 
         required: function() {
@@ -35,53 +32,40 @@ const UserSchema = new Schema({
     profilePicture: String,
     addresses: [AddressSchema],
 
-    // --- Social Login (Google & Facebook) ---
     socialAccounts: {
         googleId: { type: String, unique: true, sparse: true },
         facebookId: { type: String, unique: true, sparse: true },
-        // نحتفظ بصورة البروفايل القادمة من السوشيال ميديا إذا احتجنا
         profileUrl: String 
     },
 
-    // --- التحقق من الحساب (Verification) ---
     isEmailVerified: { type: Boolean, default: false },
     isPhoneVerified: { type: Boolean, default: false },
     
-    // Tokens for Email/Phone Verification
     verificationToken: String,
     verificationTokenExpires: Date,
 
-    // --- استعادة كلمة المرور ---
     passwordResetToken: String,
     passwordResetExpires: Date,
 
-    // --- Multi-Factor Authentication (2FA) ---
     twoFactorEnabled: { type: Boolean, default: false },
     
-    // نوع الـ 2FA المفضل (تطبيق مثل Google Authenticator أو رسالة SMS)
     twoFactorMethod: { 
         type: String, 
         enum: ['app', 'sms', 'email'], 
         default: 'email' 
     },
-    // أضيفي هذا الحقل داخل UserSchema في ملف models/users.js
 accountStatus: { 
     type: String, 
     enum: ['pending', 'approved', 'rejected'], 
     default: function() {
-        // إذا كان المستخدم مشترٍ (buyer) يتم تفعيله تلقائياً، وإذا كان بائع أو سابورت ينتظر الموافقة
         return (this.role === 'buyer') ? 'approved' : 'pending';
     }
 },
     
-    // السر الخاص بتطبيقات المصادقة (TOTP Secret)
     twoFactorSecret: String, 
     
-    // أكواد احتياطية للدخول في حال ضياع الهاتف (Backup Codes)
     twoFactorRecoveryCodes: [String],
-    // أضيفي هذا الحقل داخل UserSchema
-isBanned: { type: Boolean, default: false }, // FR-A23
-    // Notification Preferences
+isBanned: { type: Boolean, default: false }, 
     notificationPreferences: {
         email: { type: Boolean, default: true },
         sms: { type: Boolean, default: true },

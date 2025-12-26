@@ -1,10 +1,9 @@
-const mongoose = require("mongoose"); // <-- ده السطر اللي كان ناقص
+const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
 const FAQSchema = new Schema({
     question: { type: String, required: true },
     answer: { type: String, required: true },
-    // FR-CS7: Categorization specific to FAQs
     category: { 
         type: String, 
         enum: [
@@ -17,8 +16,7 @@ const FAQSchema = new Schema({
         ],
         required: true 
     },
-    isActive: { type: Boolean, default: true } // Helper to hide/show FAQs
+    isActive: { type: Boolean, default: true } 
 }, { timestamps: true });
 
-// يفضل دايما اسم المودل يكون بحرف كابيتال "FAQ"
 module.exports = mongoose.model("FAQ", FAQSchema);

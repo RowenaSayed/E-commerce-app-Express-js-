@@ -34,23 +34,18 @@ router.post('/social-login', socialLogin);
 router.post('/verify-2fa', verify2FA);
 router.post('/forgot-password',forgotPassword);
 router.put('/reset-password/:token',resetPassword);
-router.get('/verify/:token', verifyEmail); // ✅ تم نقل المسار الثابت هنا
+router.get('/verify/:token', verifyEmail); 
 
-// --- 2. 🛡️ المسارات المحمية العامة والخاصة ---
-router.get('/', auth, authorize('admin'), listUsers); // الأدمن فقط يشوف كل اليوزرز (ثابت)
-router.put('/profile',upload.single('profilePicture'), auth, updateUser); // المستخدم يحدث بياناته (بدون صورة بروفايل)
+router.get('/', auth, authorize('admin'), listUsers); 
+router.put('/profile',upload.single('profilePicture'), auth, updateUser); 
 router.post('/address', auth, addNewAddress);
 router.get('/addresses', auth, getSavedAddresses);
 router.get('/seller',auth,authorize('admin'),getUsers)
-// --- 3. 🚀 المسارات الديناميكية (يجب أن تأتي أخيراً) 🚀
-router.get('/:id', auth, getUserById); // المستخدم يشوف بياناته
-//for Admin to update any user and for user to update his own data
+router.get('/:id', auth, getUserById); 
 router.put('/user/:id', auth, upload.single('profilePicture'), updateUserById);  
-// المستخدم يحدث بياناته + صورة بروفايل
-router.put('/:id/toggle-ban', auth, authorize('admin'), toggleBanUser); // الأدمن يوقف/يفعل يوزر
+router.put('/:id/toggle-ban', auth, authorize('admin'), toggleBanUser); 
 router.put('/:id/status',auth,authorize('admin'),updateSellerStatus)
-router.delete('/:id', auth, authorize('admin'), deleteUserById); // الأدمن يحذف
-// في routes/users.js
+router.delete('/:id', auth, authorize('admin'), deleteUserById); 
 router.put('/:id/review', auth, authorize('admin'), reviewUserStatus);
 
 router.put('/address/:addressId', auth, updateAddress);

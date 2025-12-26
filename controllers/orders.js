@@ -4,7 +4,7 @@ const Promotion = require('../models/promos');
 const Product = require('../models/products');
 const Cart = require('../models/carts');
 const Governates = require('../models/governates');
-// تأكدي من مسار ملف الإيميل
+const mongoose=require('mongoose')
 const { sendOrderStatusEmail } = require('../utilities/email');
 
 const calculateDeliveryDate = (governate, deliveryType = 'standard') => {
@@ -12,13 +12,12 @@ const calculateDeliveryDate = (governate, deliveryType = 'standard') => {
     let deliveryDays = governate.deliveryTime || 5; 
 
     if (deliveryType === 'express') {
-         deliveryDays = Math.max(1, deliveryDays - 1); // الشحن السريع يقلل يوم بحد أدنى يوم واحد
+         deliveryDays = Math.max(1, deliveryDays - 1);
     }
     
     let daysAdded = 0;
     const estimatedDate = new Date(today);
     
-    // يضيف عدد الأيام المحددة، متجاهلاً عطلات نهاية الأسبوع (السبت والأحد)
     while (daysAdded < deliveryDays) {
         estimatedDate.setDate(estimatedDate.getDate() + 1);
         // Skip weekends (0 = Sunday, 6 = Saturday)
@@ -39,7 +38,7 @@ const calculateAdminOrderTotals = (itemsWithPrice, governate, deliveryMethod = '
 
     let deliveryFee = governate?.fee || 0;
     if (deliveryMethod === 'express') {
-        deliveryFee = Math.round(deliveryFee * 1.5); // زيادة 50% للشحن السريع
+        deliveryFee = Math.round(deliveryFee * 1.5);
     }
     
     const VAT = subtotal * vatRate;
@@ -178,7 +177,6 @@ const createOrder = async (req, res) => {
         const totalAmount = subtotal + VAT + deliveryFee - discount;
         const paymentStatus = paymentMethod === 'Online' ? 'Paid' : 'Pending';
 
-        // Generate unique order number
         let generatedOrderNumber;
         let isUnique = false;
 
@@ -192,12 +190,10 @@ const createOrder = async (req, res) => {
             if (!existingOrder) isUnique = true;
         }
 
-        // Calculate estimated delivery date (5 business days)
         const estimatedDate = new Date();
         let daysAdded = 0;
         while (daysAdded < 5) {
             estimatedDate.setDate(estimatedDate.getDate() + 1);
-            // Skip weekends (0 = Sunday, 6 = Saturday)
             if (estimatedDate.getDay() !== 0 && estimatedDate.getDay() !== 6) {
                 daysAdded++;
             }
@@ -257,35 +253,31 @@ const createOrder = async (req, res) => {
 };
 const adminCreateOrder = async (req, res) => {
     try {
-        // 1. استخراج البيانات من جسم الطلب
+        
         const {
-            userId, // 🛑 ID العميل
-            items, // [ { product: ID, quantity: N, condition: 'New' } ]
+            userId, 
+            items, 
             shippingAddress, 
             paymentMethod,
             deliveryMethod = 'standard',
-            internalNotes // FR-A17: ملاحظات داخلية
+            internalNotes 
         } = req.body;
 
-        // 2. التحقق من البيانات المطلوبة
         if (!userId || !items || items.length === 0 || !shippingAddress || !shippingAddress.governorate || !paymentMethod) {
             return res.status(400).json({ message: "Missing required fields (userId, items, shippingAddress.governorate, paymentMethod)." });
         }
         
-        // 3. جلب معلومات المحافظة (لحساب الشحن ولحل مشكلة Governate is not defined)
         const governateInfo = await Governate.findOne({ name: shippingAddress.governorate });
         if (!governateInfo) {
             return res.status(400).json({ message: `Invalid governorate name: ${shippingAddress.governorate} or not found.` });
         }
         
-        // 4. التحقق من المخزون وتجهيز بيانات الأصناف
         let itemsForCalculation = [];
         let orderItems = [];
         
         for (const item of items) {
             const productDoc = await Product.findById(item.product);
             
-            // تحقق من وجود المنتج وكمية المخزون
             if (!productDoc || productDoc.stockQuantity < item.quantity) {
                  return res.status(400).json({ message: `Insufficient stock for product: ${productDoc?.name || item.product}` });
             }
@@ -295,7 +287,6 @@ const adminCreateOrder = async (req, res) => {
                 quantity: item.quantity 
             });
             
-            // تجهيز العنصر للحفظ في موديل Order (باستخدام السعر الحالي)
             orderItems.push({
                 product: item.product,
                 quantity: item.quantity,
@@ -304,20 +295,15 @@ const adminCreateOrder = async (req, res) => {
                 condition: item.condition || 'New'
             });
         }
-
-        // 5. حساب الإجماليات
         const totals = calculateAdminOrderTotals(
             itemsForCalculation,
             governateInfo, 
             deliveryMethod
         );
 
-        // 6. إنشاء رقم الطلب وتاريخ التسليم
-        // 🛑 استخدم رقم طلب مميز لطلبات الأدمن
         const generatedOrderNumber = `ADM-${Date.now()}`; 
         const estimatedDate = calculateDeliveryDate(governateInfo, deliveryMethod);
 
-        // 7. إنشاء الطلب في قاعدة البيانات
         const newOrder = new Order({
             user: userId,
             orderNumber: generatedOrderNumber,
@@ -340,12 +326,11 @@ const adminCreateOrder = async (req, res) => {
             discount: discount, 
             status: "Order Placed by Admin",
             isCreatedByAdmin: true,
-            internalNotes: internalNotes // حفظ ملاحظات الأدمن
+            internalNotes: internalNotes
         });
         
         await newOrder.save();
         
-        // 8. تخفيض المخزون
         for (const item of orderItems) {
             await Product.findByIdAndUpdate(item.product, { 
                 $inc: { stockQuantity: -item.quantity } 
@@ -360,60 +345,44 @@ const adminCreateOrder = async (req, res) => {
 
     } catch (err) {
         console.error("Admin Order Creation Error:", err);
-        // يمكنك إرجاع رسالة خطأ أكثر تفصيلاً في بيئة التطوير
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
-// 2. Get Orders (FR-O1, FR-O6)
-// 2. Get Orders (FR-O1: عرض الطلبات)
-// 2. Get Orders (Updated for FR-A14)
+
 const getOrders = async (req, res) => {
     try {
         const user = req.user;
 
-        // 1. استخراج الـ ID بأمان (كما هو)
         const userId = user._id ? user._id.toString() : user.id.toString();
 
-        let query = {}; // كائن البحث الأساسي
+        let query = {}; 
 
-        // 2. تحديد الصلاحيات وبناء الاستعلام (Query Building)
         if (user.role === "admin" || user.role === "support") {
-            // === منطق الأدمن (FR-A14: Filters) ===
 
-            // استقبال الفلاتر من الرابط (Query Params)
             const { status, paymentMethod, orderNumber, dateFrom, dateTo } = req.query;
 
-            // أ) فلتر الحالة (Pending, Shipped, etc.)
             if (status) query.status = status;
 
-            // ب) فلتر طريقة الدفع (Cash, Card)
             if (paymentMethod) query.paymentMethod = paymentMethod;
 
-            // ج) البحث برقم الطلب (Exact Match)
             if (orderNumber) query.orderNumber = orderNumber;
 
-            // د) فلتر النطاق الزمني (Date Range)
             if (dateFrom || dateTo) {
                 query.createdAt = {};
-                if (dateFrom) query.createdAt.$gte = new Date(dateFrom); // من تاريخ
-                if (dateTo) query.createdAt.$lte = new Date(dateTo);     // إلى تاريخ
+                if (dateFrom) query.createdAt.$gte = new Date(dateFrom);  
+                if (dateTo) query.createdAt.$lte = new Date(dateTo);      
             }
 
-            // هـ) يمكن إضافة البحث باسم العميل هنا (يحتاج Aggregation متقدم، لكن الفلاتر أعلاه كافية حالياً)
 
         } else {
-            // === منطق المشتري (Buyer Logic) ===
-            // العميل يرى فقط الطلبات المرتبطة بالـ ID الخاص به
             query.user = userId;
         }
 
-        // 3. تنفيذ البحث (Unified Execution)
         const orders = await Order.find(query)
-            .populate("items.product", "name price images") // تفاصيل المنتج
-            .populate("user", "name email phone")          // تفاصيل العميل (مهمة للأدمن)
-            .sort({ createdAt: -1 });                      // الأحدث أولاً
+            .populate("items.product", "name price images")
+            .populate("user", "name email phone")         
+            .sort({ createdAt: -1 });                     
 
-        // 4. الإرجاع (أضفت الـ count لتسهيل العرض في الفرونت)
         res.json({
             count: orders.length,
             orders
@@ -425,25 +394,19 @@ const getOrders = async (req, res) => {
     }
 };
 
-// 3. Get Order By ID (FR-O2: تفاصيل الطلب)
 const getOrderById = async (req, res) => {
     try {
         const user = req.user;
         const userId = user._id ? user._id.toString() : user.id.toString();
 
-        // جلب الطلب وعمل Populate لبيانات اليوزر
         const order = await Order.findById(req.params.id)
             .populate("items.product", "name price images")
             .populate("user", "name email");
 
         if (!order) return res.status(404).json({ message: "Order not found" });
 
-        // 🛑 التصحيح الجوهري هنا 👇👇
-        // بما أننا عملنا populate('user')، الـ order.user أصبح "Object" كامل مش مجرد ID
-        // واسم الحقل في المودل هو 'user' وليس 'userId'
         const orderOwnerId = order.user._id.toString();
 
-        // التحقق من الصلاحية: (لو مش أدمن/دعم فني) AND (الآيدي لا يطابق صاحب الطلب)
         if (user.role !== "admin" && user.role !== "support" && orderOwnerId !== userId) {
             return res.status(403).json({ message: "Access denied" });
         }
@@ -454,7 +417,6 @@ const getOrderById = async (req, res) => {
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
-// 4. Cancel Order (FR-O10, FR-O11, FR-O12)
 const cancelOrder = async (req, res) => {
     try {
         const userId = req.user._id || req.user.id;
@@ -467,7 +429,6 @@ const cancelOrder = async (req, res) => {
             return res.status(403).json({ message: "Access denied" });
         }
 
-        // FR-O10: Cancel only before shipping
         if (['Shipped', 'Out for Delivery', 'Delivered', 'Cancelled'].includes(order.orderStatus)) {
             return res.status(400).json({ message: "Cannot cancel order at this stage." });
         }
@@ -477,12 +438,10 @@ const cancelOrder = async (req, res) => {
         order.cancellationReason = reason || 'Other';
         order.cancellationDate = Date.now();
 
-        // FR-O12: Refund Logic
         if (order.paymentMethod === 'Online' && order.paymentStatus === 'Paid') {
             order.paymentStatus = 'Refunded';
         }
 
-        // Return stock
         for (const item of order.items) {
             const product = await Product.findById(item.product);
             if (product) {
@@ -498,7 +457,6 @@ const cancelOrder = async (req, res) => {
     }
 };
 
-// 5. Request Return (FR-O13 to FR-O16)
 const requestReturn = async (req, res) => {
     try {
         const userId = req.user._id || req.user.id;
@@ -533,81 +491,38 @@ const requestReturn = async (req, res) => {
     }
 };
 
-// 6. Update Order Status (Admin) - FR-O3, FR-O5, FR-O9
-// 3. Update Order Status (Admin/Support Only)
+
 const updateOrderStatus = async (req, res) => {
     try {
-        // 1. استقبال البيانات الجديدة (الحالة، التتبع، والملاحظات الداخلية)
         const { status, trackingNumber, internalNotes } = req.body;
-
-        const order = await Order.findById(req.params.id)
-            .populate('user', 'email name');
-
+        const order = await Order.findById(req.params.id).populate('user', 'email name');
         if (!order) return res.status(404).json({ message: "Order not found" });
 
-        // التحقق من الصلاحيات (Admin or Support)
-        if (req.user.role !== "admin" && req.user.role !== "support") {
+        if (req.user.role !== "admin" && req.user.role !== "seller")
             return res.status(403).json({ message: "Access denied" });
-        }
 
-        // حفظ الحالة القديمة للمقارنة (مهم جداً لمنع تكرار استرجاع المخزون)
         const oldStatus = order.orderStatus;
-
-        // تحديث الحالة
         if (status) order.orderStatus = status;
-
-        // FR-A17: إضافة أو تحديث الملاحظات الداخلية للأدمن
-        if (internalNotes) {
-            order.internalNotes = internalNotes;
-        }
-
-        // FR-O5: تحديث رقم التتبع عند الشحن
-        if (status === 'Shipped' && trackingNumber) {
-            order.trackingNumber = trackingNumber;
-        }
-
-        // تحديث بيانات الدفع والتوصيل عند التسليم
+        if (internalNotes) order.internalNotes = internalNotes;
+        if (status === 'Shipped' && trackingNumber) order.trackingNumber = trackingNumber;
         if (status === 'Delivered') {
             order.actualDeliveryDate = Date.now();
             order.paymentStatus = 'Paid';
-            if (typeof sendOrderStatusEmail === 'function') {
-                    await sendOrderStatusEmail(
-                        order.user.email, order.user.name, order.orderNumber, status
-                    );
-            }
+            if (sendOrderStatusEmail) await sendOrderStatusEmail(order.user.email, order.user.name, order.orderNumber, status);
         }
-        // FR-A19: استرجاع المخزون (Restock) تلقائياً عند الإلغاء أو الإرجاع
-        // الشرط: الحالة الجديدة "Cancelled/Returned" AND الحالة القديمة لم تكن كذلك
+
         if ((status === 'Cancelled' || status === 'Returned') && (oldStatus !== 'Cancelled' && oldStatus !== 'Returned')) {
             for (const item of order.items) {
-                await Product.findByIdAndUpdate(item.product, {
-                    $inc: {
-                        stockQuantity: item.quantity, // نرجع الكمية للمخزن
-                        sold: -item.quantity          // نقلل عداد المبيعات
-                    }
-                });
+                await Product.findByIdAndUpdate(item.product, { $inc: { stockQuantity: item.quantity, sold: -item.quantity } });
             }
-            if (typeof sendOrderStatusEmail === 'function') {
-                 await sendOrderStatusEmail(
-                     order.user.email, order.user.name, order.orderNumber, status
-                 );
-            }
+            if (sendOrderStatusEmail) await sendOrderStatusEmail(order.user.email, order.user.name, order.orderNumber, status);
+        }
+
+        if (status === 'Out for Delivery' && sendOrderStatusEmail) {
+            await sendOrderStatusEmail(order.user.email, order.user.name, order.orderNumber, status);
         }
 
         await order.save();
-
-        // FR-O9: Notification (Email) - الحفاظ على اللوجيك القديم
-        if (status === 'Out for Delivery') {
-            if (typeof sendOrderStatusEmail === 'function') {
-                await sendOrderStatusEmail(
-                    order.user.email,
-                    order.user.name,
-                    order.orderNumber,
-                    status
-                );
-            }
-        }
-
         res.json({ message: "Order status updated successfully", order });
     } catch (err) {
         console.error("Update Status Error:", err);
@@ -670,7 +585,121 @@ const getOrdersByUserId = async (req, res) => {
     }
 };
 
+const getSellerOrders = async (req, res) => {
+    try {
+        const sellerId = req.user._id || req.user.id;
 
+        if (req.user.role !== 'seller') {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied: Seller only"
+            });
+        }
+
+        const { status, paymentMethod, orderNumber, dateFrom, dateTo } = req.query;
+
+        const sellerProducts = await Product.find({ 
+            seller: new mongoose.Types.ObjectId(sellerId),
+            isDeleted: false 
+        }).select('_id');
+
+        const sellerProductIds = sellerProducts.map(p => p._id);
+
+        if (sellerProductIds.length === 0) {
+            return res.status(200).json({
+                success: true,
+                count: 0,
+                stats: {
+                    totalOrders: 0,
+                    totalRevenue: 0,
+                    totalItems: 0,
+                    pendingOrders: 0,
+                    shippedOrders: 0,
+                    deliveredOrders: 0
+                },
+                orders: []
+            });
+        }
+
+        let matchQuery = {
+            'items.product': { $in: sellerProductIds }
+        };
+
+        if (status) matchQuery.orderStatus = status;
+        if (paymentMethod) matchQuery.paymentMethod = paymentMethod;
+        if (orderNumber) matchQuery.orderNumber = orderNumber;
+
+        if (dateFrom || dateTo) {
+            matchQuery.createdAt = {};
+            if (dateFrom) matchQuery.createdAt.$gte = new Date(dateFrom);
+            if (dateTo) matchQuery.createdAt.$lte = new Date(dateTo);
+        }
+
+        const orders = await Order.aggregate([
+            { $match: matchQuery },
+            {
+                $addFields: {
+                    items: {
+                        $filter: {
+                            input: "$items",
+                            as: "item",
+                            cond: {
+                                $in: ["$$item.product", sellerProductIds]
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                $addFields: {
+                    sellerSubtotal: {
+                        $sum: {
+                            $map: {
+                                input: "$items",
+                                as: "item",
+                                in: { $multiply: [
+                                    { $ifNull: ["$$item.priceAtPurchase", "$$item.price"] }, 
+                                    "$$item.quantity"
+                                ]}
+                            }
+                        }
+                    },
+                    sellerItemsCount: { $size: "$items" }
+                }
+            },
+            { $sort: { createdAt: -1 } }
+        ]);
+
+        await Order.populate(orders, [
+            { path: 'items.product', select: 'name price images category' },
+            { path: 'user', select: 'name email phone' }
+        ]);
+
+        const stats = {
+            totalOrders: orders.length,
+            totalRevenue: orders.reduce((sum, order) => sum + (order.sellerSubtotal || 0), 0),
+            totalItems: orders.reduce((sum, order) => sum + (order.sellerItemsCount || 0), 0),
+            pendingOrders: orders.filter(o => o.orderStatus === 'Order Placed' || o.orderStatus === 'Processing').length,
+            shippedOrders: orders.filter(o => o.orderStatus === 'Shipped').length,
+            deliveredOrders: orders.filter(o => o.orderStatus === 'Delivered').length
+        };
+
+        res.status(200).json({
+            success: true,
+            count: orders.length,
+            stats,
+            orders
+        });
+
+    } catch (err) {
+        console.error("getSellerOrders Error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: err.message
+        });
+    }
+};
 
 module.exports = {
     createOrder,
@@ -682,5 +711,6 @@ module.exports = {
     deleteOrder,
     adminCreateOrder,
     getUserReturnRequests,
-    getOrdersByUserId
+    getOrdersByUserId,
+    getSellerOrders
 };

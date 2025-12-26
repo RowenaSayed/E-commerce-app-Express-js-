@@ -8,17 +8,12 @@ const {
     markReviewHelpful 
 } = require('../controllers/reviews');
 
-// 1. عرض الريفيوهات (مفتوح للكل)
 router.get('/', getAllReviews);
 
-// 2. إنشاء ريفيو (Auth فقط، والتحقق من الرتبة بيتم جوه الكنترولر)
 router.post('/', auth, createReview);
 
-// 3. تصويت مفيد (Auth Required)
 router.put('/:id/helpful', auth, markReviewHelpful);
 
-// 4. حذف ريفيو (Auth Required)
-// شيلنا authorize('admin') من هنا، وهندلناها جوه الكنترولر عشان نسمح لصاحب الريفيو يمسحه
 router.delete('/:id', auth, deleteReview);
 
 module.exports = router;

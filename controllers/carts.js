@@ -84,7 +84,6 @@ const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
         return { valid: false, message: "Promotion expired" };
     }
 
-    // Check if promo is limited to specific products/categories
     if (promo.applicableProducts && promo.applicableProducts.length > 0) {
         const cartProductIds = cart.items.map(item => item.product._id.toString());
         const hasApplicableProduct = cartProductIds.some(productId =>
@@ -121,7 +120,6 @@ const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
         }
     }
 
-    // Check one-time use
     if (promo.oneTimeUse && promo.usedBy?.some(u => u.user.toString() === userId)) {
         return {
             valid: false,
@@ -134,7 +132,6 @@ const validateAndApplyPromotion = async (promotionCode, cart, userId) => {
 
     if (promo.type === 'Percentage') {
         discount = cartSubtotal * (promo.value / 100);
-        // Cap percentage discount if maxDiscount is set
         if (promo.maxDiscount) {
             discount = Math.min(discount, promo.maxDiscount);
         }
@@ -191,7 +188,6 @@ const getCart = async (req, res) => {
         if (itemsWereRemoved || quantitiesWereAdjusted) {
             cart.items = updatedItems;
 
-            // Revalidate promotion if cart changed
             if (cart.discountCode) {
                 const revalidation = await validateAndApplyPromotion(
                     cart.discountCode,
@@ -204,7 +200,6 @@ const getCart = async (req, res) => {
                     cart.discountAmount = undefined;
                     cart.freeShipping = undefined;
                 } else {
-                    // Update discount based on new cart value
                     cart.discountAmount = revalidation.discount;
                     cart.freeShipping = revalidation.freeShipping;
                 }
@@ -339,7 +334,6 @@ const calculateShipping = async (req, res) => {
         const discount = cart.discountAmount || 0;
         const finalSubtotal = Math.max(0, subtotal - discount);
 
-        // Use the same helper function for consistency
         const deliveryFee = calculateDeliveryFee(governate, deliveryMethod, cart.freeShipping || false);
 
         const vatRate = 0.05;
@@ -414,7 +408,6 @@ const getCompleteInvoice = async (req, res) => {
         const discount = cart.discountAmount || 0;
         const finalSubtotal = Math.max(0, subtotal - discount);
 
-        // Use helper function for consistency
         const deliveryFee = calculateDeliveryFee(
             governate,
             cart.shippingInfo.deliveryMethod,
@@ -474,6 +467,39 @@ const getCompleteInvoice = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
+const mergeGuestCart = async (req, res) => {
+  try {
+    const { items } = req.body;
+    const userId = req.user.id;
+
+    let cart = await Cart.findOne({ user: userId });
+
+    if (!cart) {
+      cart = new Cart({ user: userId, items: [] });
+    }
+
+    items.forEach(gItem => {
+      const index = cart.items.findIndex(
+        item => item.product.toString() === gItem.productId
+      );
+
+      if (index > -1) {
+        cart.items[index].quantity += gItem.quantity;
+      } else {
+        cart.items.push({
+          product: gItem.productId,
+          quantity: gItem.quantity
+        });
+      }
+    });
+
+    await cart.save();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: 'Merge failed', error: err.message });
+  }
+};
+
 
 const getShippingOptions = async (req, res) => {
     try {
@@ -746,7 +772,6 @@ const applyPromotionCode = async (req, res) => {
             });
         }
 
-        // Track promotion usage
         if (req.user?.id && validation.promotion) {
             validation.promotion.usedBy = validation.promotion.usedBy || [];
             const userIndex = validation.promotion.usedBy.findIndex(
@@ -1012,17 +1037,14 @@ const initiatePayment = async (req, res) => {
             });
 
         } else if (paymentMethod === 'Online') {
-            // Calculate discounted price per item
             const lineItems = cart.items.map(item => {
                 const originalItemTotal = item.product.price * item.quantity;
                 const discountRatio = totals.discount > 0 ? (totals.discount / totals.subtotal) : 0;
                 const itemDiscount = originalItemTotal * discountRatio;
                 const discountedItemTotal = originalItemTotal - itemDiscount;
 
-                // Calculate VAT for this item
                 const itemVAT = discountedItemTotal * 0.05;
 
-                // Calculate final price per unit
                 const finalUnitPrice = (discountedItemTotal + itemVAT) / item.quantity;
 
                 return {
@@ -1142,5 +1164,6 @@ module.exports = {
     removeCartItem,
     clearCart,
     initiatePayment,
-    handleStripeSuccess
+    handleStripeSuccess,
+    mergeGuestCart
 };

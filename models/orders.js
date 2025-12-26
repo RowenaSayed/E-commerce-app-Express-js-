@@ -63,7 +63,6 @@ const OrderSchema = new Schema({
     },
     cancellationDate: Date,
     
-    // FR-A17: Internal Notes (Admin only)
     internalNotes: { type: String },
 
     // Return Request Logic
@@ -79,7 +78,7 @@ const OrderSchema = new Schema({
         status: { 
             type: String, 
             enum: ['None', 'Return Requested', 'Return Approved', 'Return Rejected', 'Refund Processed'], 
-            default: 'None'  // ✅ Fixed: أضفنا 'None' و removed required/default في المكان الخطأ
+            default: 'None'  
         }
     }
 }, { timestamps: true });

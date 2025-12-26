@@ -1,5 +1,6 @@
 const Product = require('../models/products');
 const User =require('../models/users')
+const mongoose = require('mongoose');
 
 // ================================================
 // HELPER FUNCTIONS
@@ -362,15 +363,24 @@ const getProducts = async (req, res) => {
         if (seller) filter.seller = seller;
         if (featured === 'true') filter.isFeatured = true;
 
-        if (minPrice || maxPrice) {
-            filter.price = {};
-            if (minPrice) filter.price.$gte = Number(minPrice);
-            if (maxPrice) filter.price.$lte = Number(maxPrice);
-        }
+        const min = minPrice !== undefined ? Number(minPrice) : null;
+const max = maxPrice !== undefined ? Number(maxPrice) : null;
+
+if (min !== null || max !== null) {
+  filter.price = {};
+  if (min !== null) filter.price.$gte = min;
+  if (max !== null) filter.price.$lte = max;
+}
+
 
         if (search) {
-            filter.$text = { $search: search };
+        filter.$or = [
+            { name: { $regex: search, $options: 'i' } },
+            { description: { $regex: search, $options: 'i' } },
+            { brand: { $regex: search, $options: 'i' } }
+        ];
         }
+
 
         // Low stock filter (Admin only)
         if (lowStock === 'true' && isAdmin(req.user)) {
@@ -570,8 +580,8 @@ const getProductsBySeller = async (req, res) => {
             });
         }
 
-        const { page = 1, limit = 20, includeArchived } = req.query;
-        const skip = (page - 1) * limit;
+        // const {  includeArchived } = req.query;
+        // const skip = (page - 1) * limit;
 
         let filter = {
             seller: sellerId
@@ -591,9 +601,9 @@ const getProductsBySeller = async (req, res) => {
         const [products, total] = await Promise.all([
             Product.find(filter)
                 .populate('seller', 'name profilePicture')
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(Number(limit)),
+                .sort({ createdAt: -1 }),
+                // .skip(skip)
+                // .limit(Number(limit)),
             Product.countDocuments(filter)
         ]);
 
@@ -603,8 +613,8 @@ const getProductsBySeller = async (req, res) => {
             isOwnProducts,
             count: products.length,
             total,
-            page: Number(page),
-            pages: Math.ceil(total / limit),
+            // page: Number(page),
+            // pages: Math.ceil(total / limit),
             products
         });
     } catch (error) {
@@ -849,10 +859,15 @@ const getSellerStatsById = async (req, res) => {
             });
         }
 
-        const stats = await Product.aggregate([
+        // ✅ الحل: تحويل الـ ID إلى ObjectId
+        const sellerId = new mongoose.Types.ObjectId(req.user._id || req.user.id);
+
+        console.log('Seller ID:', sellerId); // للتأكد
+
+        const statsResult = await Product.aggregate([
             {
                 $match: {
-                    seller: req.user.id,
+                    seller: sellerId, // ✅ الآن ObjectId صحيح
                     isDeleted: false
                 }
             },
@@ -875,60 +890,38 @@ const getSellerStatsById = async (req, res) => {
                     },
                     publishedCount: {
                         $sum: {
-                            $cond: [
-                                { $eq: ["$visibility", "Published"] },
-                                1,
-                                0
-                            ]
+                            $cond: [{ $eq: ["$visibility", "Published"] }, 1, 0]
                         }
                     },
                     draftCount: {
                         $sum: {
-                            $cond: [
-                                { $eq: ["$visibility", "Draft"] },
-                                1,
-                                0
-                            ]
+                            $cond: [{ $eq: ["$visibility", "Draft"] }, 1, 0]
                         }
                     }
                 }
             }
         ]);
 
-        const categoryStats = await Product.aggregate([
-            {
-                $match: {
-                    seller: req.user.id,
-                    isDeleted: false
-                }
-            },
-            {
-                $group: {
-                    _id: "$category",
-                    count: { $sum: 1 },
-                    totalSold: { $sum: "$sold" },
-                    totalRevenue: { $sum: { $multiply: ["$sold", "$price"] } }
-                }
-            },
-            { $sort: { totalSold: -1 } }
-        ]);
+        const stats = statsResult[0] || {
+            totalProducts: 0,
+            totalStock: 0,
+            totalSold: 0,
+            totalRevenue: 0,
+            averageRating: 0,
+            lowStockCount: 0,
+            publishedCount: 0,
+            draftCount: 0
+        };
+
+        console.log('Stats Result:', stats); // ✅ للتأكد من النتائج
 
         res.status(200).json({
             success: true,
-            stats: stats[0] || {
-                totalProducts: 0,
-                totalStock: 0,
-                totalSold: 0,
-                totalRevenue: 0,
-                averageRating: 0,
-                lowStockCount: 0,
-                publishedCount: 0,
-                draftCount: 0
-            },
-            categoryStats
+            stats
         });
 
     } catch (error) {
+        console.error('Stats Error:', error); // ✅ لعرض الأخطاء
         res.status(500).json({
             success: false,
             message: "Server Error",
@@ -936,6 +929,7 @@ const getSellerStatsById = async (req, res) => {
         });
     }
 };
+
 
 
 const getSellerStats = async (req, res) => {

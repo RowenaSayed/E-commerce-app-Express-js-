@@ -1,9 +1,6 @@
 const express = require('express');
 const router = express.Router();
 
-/* =========================
-   Controllers
-========================= */
 const {
     createProduct,
     updateProduct,
@@ -23,18 +20,11 @@ const {
     getOutOfStockProducts
 } = require('../controllers/products');
 
-/* =========================
-   Middleware
-========================= */
+
 const { auth, authorize } = require('../middleware/auth');
 const upload = require('../utilities/fileUpload');
 
-/* =========================
-   Protected Routes
-   (Admin / Seller)
-========================= */
 
-// FR-A3 & FR-A6: Create Product (Admin/Seller) + Multiple Images (Max 10)
 router.post(
     '/',
     auth,
@@ -43,7 +33,6 @@ router.post(
     createProduct
 );
 
-// FR-A4 & FR-A6: Edit Product
 router.put(
     '/:id',
     auth,
@@ -52,7 +41,6 @@ router.put(
     updateProduct
 );
 
-// FR-A5: Soft Delete Product
 router.delete(
     '/:id',
     auth,
@@ -60,7 +48,6 @@ router.delete(
     deleteProduct
 );
 
-// Delete single product image
 router.delete(
     '/:id/image',
     auth,
@@ -68,7 +55,6 @@ router.delete(
     deleteProductImage
 );
 
-// Restore archived product
 router.post(
     '/:id/restore',
     auth,
@@ -76,7 +62,6 @@ router.post(
     restoreProduct
 );
 
-// Update stock quantity
 router.put(
     '/:id/stock',
     auth,
@@ -84,7 +69,6 @@ router.put(
     updateStock
 );
 
-// Update product visibility
 router.put(
     '/:id/visibility',
     auth,
@@ -92,11 +76,8 @@ router.put(
     updateVisibility
 );
 
-/* =========================
-   Admin Only Routes
-========================= */
 
-// FR-A9: Get low stock products
+
 router.get(
     '/low-stock/admin',
     auth,
@@ -104,7 +85,6 @@ router.get(
     getLowStockProducts
 );
 
-// FR-A12: Toggle featured product
 router.put(
     '/:id/toggle-featured',
     auth,
@@ -112,11 +92,6 @@ router.put(
     toggleFeatured
 );
 
-/* =========================
-   Seller Only Routes
-========================= */
-
-// FR-A11: Seller dashboard stats
 router.get(
     '/stats/seller',
     auth,
@@ -125,11 +100,7 @@ router.get(
 );
 router.get('/allStats',auth,authorize('admin'),getSellerStats)
 
-/* =========================
-    Public Routes
-========================= */
 
-// Get all products (supports admin filters like lowStock)
 router.get('/', getProducts);
 
 router.get('/:id', getProductById);
@@ -139,7 +110,5 @@ router.get('/category/:category', getProductByCategory);
 router.get('/seller/:sellerId', getProductsBySeller);
 router.get("/stats/out-of-stock", getOutOfStockProducts);
 
-/* =========================
-    Export Router
-========================= */
+
 module.exports = router;
